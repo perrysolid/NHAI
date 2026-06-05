@@ -36,7 +36,7 @@ describe('evaluateFace quality gates', () => {
 
   it('flags a face that is too far (small)', () => {
     const r = evaluateFace({
-      faces: [makeFace({bounds: {x: 0, y: 0, width: 150, height: 180}})], // 0.15
+      faces: [makeFace({bounds: {x: 0, y: 0, width: 80, height: 100}})], // 0.08 < minFaceRatio
       frameWidth: FRAME_W,
       brightness: goodBrightness,
     });

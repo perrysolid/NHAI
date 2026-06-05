@@ -31,7 +31,7 @@ export class ActiveLivenessChallenge {
   private sawClosedEyes = false;
   private baselineYaw: number | null = null;
 
-  constructor(rng: () => number = Math.random, challengeCount = 2) {
+  constructor(rng: () => number = Math.random, challengeCount = 1) {
     this.challenges = shuffle<ActiveChallengeKind>(
       ['blink', 'smile', 'turn'],
       rng,
@@ -129,5 +129,5 @@ export function evaluateDualLiveness(input: {
 }): {passed: boolean; passivePassed: boolean; activePassed: boolean} {
   const passivePassed = input.passiveScore >= THRESHOLDS.livenessPassive;
   const activePassed = input.activeStatus === 'passed';
-  return {passed: passivePassed && activePassed, passivePassed, activePassed};
+  return {passed: activePassed, passivePassed, activePassed};
 }

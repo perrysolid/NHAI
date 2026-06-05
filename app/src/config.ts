@@ -107,20 +107,20 @@ export const THRESHOLDS = {
   /** Cosine similarity >= this means the same person. */
   recognitionCosine: 0.55,
   /** Passive liveness "live" probability must exceed this. */
-  livenessPassive: 0.7,
-  /** Active-challenge window. */
-  activeChallengeTimeoutMs: 6000,
-  /** Quality gates (used by face detection). */
-  maxYawDeg: 30,
-  maxPitchDeg: 30,
-  minFaceRatio: 0.2, // face bbox width / frame width
-  minBrightness: 60, // mean luma 0..255
-  maxBrightness: 230,
+  livenessPassive: 0.55,
+  /** Active-challenge window (generous so real users complete it). */
+  activeChallengeTimeoutMs: 9000,
+  /** Quality gates — advisory guidance, kept forgiving for field use. */
+  maxYawDeg: 36,
+  maxPitchDeg: 36,
+  minFaceRatio: 0.12, // face bbox width / frame width
+  minBrightness: 38, // mean luma 0..255
+  maxBrightness: 245,
   /** Active-liveness landmark cutoffs (ML Kit probabilities 0..1). */
-  blinkClosedProb: 0.3,
-  blinkOpenProb: 0.7,
-  smileProb: 0.7,
-  headTurnDeltaDeg: 15,
+  blinkClosedProb: 0.35,
+  blinkOpenProb: 0.65,
+  smileProb: 0.6,
+  headTurnDeltaDeg: 12,
   /** Enrollment captures averaged into one template. */
   enrollSamples: 3,
 } as const;

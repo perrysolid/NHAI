@@ -26,7 +26,7 @@ export function pick(p: Pair): string {
 }
 
 export const GATE_TEXT: Record<string, Pair> = {
-  ok: {hi: 'स्थिर रहें', en: 'Hold still'},
+  ok: {hi: 'तैयार - नीचे बटन दबाएँ', en: 'Ready - tap the button below'},
   no_face: {hi: 'चेहरा बीच में रखें', en: 'Center your face'},
   multiple_faces: {hi: 'केवल एक व्यक्ति', en: 'One person only'},
   too_far: {hi: 'थोड़ा पास आएँ', en: 'Move a little closer'},

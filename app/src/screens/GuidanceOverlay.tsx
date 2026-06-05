@@ -43,7 +43,7 @@ const styles = StyleSheet.create({
   },
   banner: {
     position: 'absolute',
-    bottom: 56,
+    bottom: 202,
     alignSelf: 'center',
     backgroundColor: 'rgba(0,0,0,0.6)',
     paddingHorizontal: 18,

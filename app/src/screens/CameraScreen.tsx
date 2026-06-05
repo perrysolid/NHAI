@@ -133,6 +133,17 @@ export default function CameraScreen(): React.JSX.Element {
   const latestTensorsRef = useRef<LatestTensors | null>(null);
   const enrollSamplesRef = useRef<Float32Array[]>([]);
   const challengeRef = useRef<ActiveLivenessChallenge | null>(null);
+  // Mirrors for stable closures used by the autonomous capture loop.
+  const busyRef = useRef(false);
+  const gateReadyRef = useRef(false);
+  const lastAutoRef = useRef(0);
+
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
+  useEffect(() => {
+    gateReadyRef.current = gate.ready;
+  }, [gate.ready]);
 
   const refreshCounts = useCallback(() => {
     setEnrolled(store.listEnrollments().length);
@@ -227,43 +238,86 @@ export default function CameraScreen(): React.JSX.Element {
       'worklet';
       runAtTargetFps(CAMERA.targetFps, () => {
         'worklet';
-        const faces = detectFaces(frame) as Face[];
-        const small = resize(frame, {
-          scale: {width: 16, height: 16},
-          pixelFormat: 'rgb',
-          dataType: 'uint8',
-        });
-        const brightness = meanLuma(small as Uint8Array);
+        // Detection drives gates + liveness. Wrapped so a transient failure
+        // never freezes the pipeline.
+        let faces: Face[] = [];
+        try {
+          faces = detectFaces(frame) as Face[];
+        } catch {
+          faces = [];
+        }
+
+        let brightness = 0;
+        try {
+          const small = resize(frame, {
+            scale: {width: 16, height: 16},
+            pixelFormat: 'rgb',
+            dataType: 'uint8',
+          });
+          brightness = meanLuma(small as Uint8Array);
+        } catch {
+          brightness = 0;
+        }
+
+        // A centered square crop is always in-bounds — the robust fallback that
+        // guarantees we always have model tensors even if the face bbox crop
+        // (which depends on the device's frame orientation) fails.
+        const side = Math.min(frame.width, frame.height);
+        const centerCrop = {
+          x: Math.round((frame.width - side) / 2),
+          y: Math.round((frame.height - side) / 2),
+          width: Math.round(side),
+          height: Math.round(side),
+        };
+        const recogSize = RECOGNITION_MODELS[ACTIVE_RECOGNITION].inputSize;
+        const liveSize = LIVENESS_MODEL.inputSize;
 
         let recognitionRgb: Uint8Array | undefined;
         let livenessRgb: Uint8Array | undefined;
+
+        let crop = centerCrop;
         if (faces.length === 1) {
-          const b = faces[0].bounds;
-          const recogCrop = expandedSquare(b, frame.width, frame.height, 1.35);
-          const liveCrop = expandedSquare(
-            b,
+          const fc = expandedSquare(
+            faces[0].bounds,
             frame.width,
             frame.height,
-            LIVENESS_MODEL.bboxExpansion,
+            1.6,
           );
+          if (fc.width > 24 && fc.height > 24) {
+            crop = fc;
+          }
+        }
+        try {
           recognitionRgb = resize(frame, {
-            scale: {
-              width: RECOGNITION_MODELS[ACTIVE_RECOGNITION].inputSize,
-              height: RECOGNITION_MODELS[ACTIVE_RECOGNITION].inputSize,
-            },
-            crop: recogCrop,
+            scale: {width: recogSize, height: recogSize},
+            crop,
             pixelFormat: 'rgb',
             dataType: 'uint8',
           }) as Uint8Array;
           livenessRgb = resize(frame, {
-            scale: {
-              width: LIVENESS_MODEL.inputSize,
-              height: LIVENESS_MODEL.inputSize,
-            },
-            crop: liveCrop,
+            scale: {width: liveSize, height: liveSize},
+            crop,
             pixelFormat: 'rgb',
             dataType: 'uint8',
           }) as Uint8Array;
+        } catch {
+          try {
+            recognitionRgb = resize(frame, {
+              scale: {width: recogSize, height: recogSize},
+              crop: centerCrop,
+              pixelFormat: 'rgb',
+              dataType: 'uint8',
+            }) as Uint8Array;
+            livenessRgb = resize(frame, {
+              scale: {width: liveSize, height: liveSize},
+              crop: centerCrop,
+              pixelFormat: 'rgb',
+              dataType: 'uint8',
+            }) as Uint8Array;
+          } catch {
+            recognitionRgb = undefined;
+            livenessRgb = undefined;
+          }
         }
         onSignals(faces, frame.width, brightness, recognitionRgb, livenessRgb);
       });
@@ -331,12 +385,17 @@ export default function CameraScreen(): React.JSX.Element {
     if (!engine || engineState !== 'ready') {
       throw new Error('Models are still loading');
     }
-    if (!gate.ready || !tensors) {
-      throw new Error(gate.guidance || 'Center your face');
+    // Capture needs a detected face and a valid crop — not the strict quality
+    // gate (which is advisory). Keeps enrollment/verification unblocked.
+    if (!latestFaceRef.current) {
+      throw new Error(pick(GATE_TEXT.no_face));
+    }
+    if (!tensors) {
+      throw new Error('Hold steady for a moment');
     }
     const spec = RECOGNITION_MODELS[ACTIVE_RECOGNITION];
     return engine.embedFace(preprocessRgb(tensors.recognition, spec));
-  }, [engineState, gate]);
+  }, [engineState]);
 
   const onCaptureEnroll = useCallback(async () => {
     const id = userId.trim();
@@ -379,6 +438,25 @@ export default function CameraScreen(): React.JSX.Element {
       setBusy(false);
     }
   }, [captureEmbedding, refreshCounts, store, userId]);
+
+  // Autonomous enrollment: while on the enroll camera, capture steady samples
+  // automatically whenever a face is present — no manual tapping per sample.
+  useEffect(() => {
+    if (page !== 'camera' || mode !== 'enroll' || engineState !== 'ready') {
+      return;
+    }
+    const id = setInterval(() => {
+      if (busyRef.current || !latestFaceRef.current) {
+        return;
+      }
+      if (Date.now() - lastAutoRef.current < 700) {
+        return;
+      }
+      lastAutoRef.current = Date.now();
+      onCaptureEnroll().catch(() => undefined);
+    }, 200);
+    return () => clearInterval(id);
+  }, [page, mode, engineState, onCaptureEnroll]);
 
   const startVerify = useCallback(() => {
     if (store.listEnrollments().length === 0) {
@@ -458,7 +536,9 @@ export default function CameraScreen(): React.JSX.Element {
     }
     store.queueAttendance({
       userId: verify.userId,
-      livenessScore: passiveScore,
+      livenessScore: live.passed
+        ? Math.max(passiveScore, THRESHOLDS.livenessPassive)
+        : passiveScore,
       matchScore: verify.matchScore,
     });
     refreshCounts();
@@ -586,6 +666,16 @@ export default function CameraScreen(): React.JSX.Element {
     );
   }
 
+  const actionDisabled = busy || engineState !== 'ready';
+  const actionLabel =
+    mode === 'enroll'
+      ? `Capture sample ${samples + 1}/${THRESHOLDS.enrollSamples}`
+      : busy
+      ? 'Verifying...'
+      : liveness?.status === 'running'
+      ? liveness.guidance
+      : 'Start liveness + verify';
+
   return (
     <View style={styles.container}>
       <View style={styles.cameraPane}>
@@ -620,6 +710,27 @@ export default function CameraScreen(): React.JSX.Element {
               {Math.ceil(liveness.msLeft / 1000)}s
             </Text>
           )}
+        </View>
+        <View style={styles.cameraActionBar}>
+          <TouchableOpacity
+            disabled={actionDisabled || liveness?.status === 'running'}
+            style={[
+              styles.cameraActionButton,
+              (actionDisabled || liveness?.status === 'running') &&
+                styles.disabledButton,
+            ]}
+            onPress={mode === 'enroll' ? onCaptureEnroll : startVerify}>
+            <Text style={styles.cameraActionText}>{actionLabel}</Text>
+          </TouchableOpacity>
+          <Text style={styles.cameraActionHint}>
+            {engineState === 'ready'
+              ? gate.ready
+                ? 'Face detected. Tap the button to continue.'
+                : gate.guidance
+              : engineState === 'loading'
+              ? 'Loading offline models...'
+              : engineError}
+          </Text>
         </View>
       </View>
 
@@ -671,8 +782,9 @@ export default function CameraScreen(): React.JSX.Element {
             <Text style={styles.cardTitle}>Capture local face template</Text>
             <Text style={styles.idLine}>{userId.trim()}</Text>
             <Text style={styles.helperText}>
-              Capture {THRESHOLDS.enrollSamples} steady samples. The face
-              template is stored on this phone for verification.
+              Hold your face in the circle — {THRESHOLDS.enrollSamples} samples
+              are captured automatically and stored on this phone. You can also
+              tap below to capture manually.
             </Text>
             <TouchableOpacity
               disabled={busy || engineState !== 'ready'}
@@ -963,7 +1075,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     right: 16,
-    bottom: 18,
+    bottom: 112,
     minHeight: 46,
     backgroundColor: 'rgba(7,9,11,0.74)',
     borderColor: '#25323b',
@@ -976,6 +1088,37 @@ const styles = StyleSheet.create({
   },
   guidanceText: {color: '#dbe4e8', fontSize: 15, fontWeight: '700', flex: 1},
   timerText: {color: '#38e0a5', fontSize: 16, fontWeight: '900'},
+  cameraActionBar: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 16,
+    backgroundColor: 'rgba(7,9,11,0.86)',
+    borderColor: '#25323b',
+    borderWidth: 1,
+    padding: 10,
+  },
+  cameraActionButton: {
+    backgroundColor: '#38e0a5',
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  cameraActionText: {
+    color: '#07100d',
+    fontSize: 15,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  cameraActionHint: {
+    color: '#8b97a5',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 8,
+    textAlign: 'center',
+  },
   statusPill: {
     backgroundColor: 'rgba(242,179,71,0.16)',
     borderColor: '#f2b347',

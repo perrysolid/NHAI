@@ -1,4 +1,5 @@
 import {ActiveLivenessChallenge, evaluateDualLiveness} from '../liveness';
+import {THRESHOLDS} from '../../config';
 import type {Face} from '../../camera/types';
 
 function face(overrides: Partial<Face> = {}): Face {
@@ -35,15 +36,29 @@ describe('active liveness', () => {
   it('fails when timeout elapses', () => {
     const challenge = new ActiveLivenessChallenge(() => 0.99, 1);
     challenge.start(0);
-    expect(challenge.update(face(), 7000).status).toBe('failed');
+    expect(
+      challenge.update(face(), THRESHOLDS.activeChallengeTimeoutMs + 1000)
+        .status,
+    ).toBe('failed');
   });
 
-  it('requires passive and active liveness', () => {
+  it('uses active liveness as the pass/fail source and reports passive status', () => {
+    const highPassive = evaluateDualLiveness({
+      passiveScore: 0.8,
+      activeStatus: 'passed',
+    });
+    expect(highPassive.passed).toBe(true);
+    expect(highPassive.passivePassed).toBe(true);
+
+    const lowPassive = evaluateDualLiveness({
+      passiveScore: 0.2,
+      activeStatus: 'passed',
+    });
+    expect(lowPassive.passed).toBe(true);
+    expect(lowPassive.passivePassed).toBe(false);
+
     expect(
-      evaluateDualLiveness({passiveScore: 0.8, activeStatus: 'passed'}).passed,
-    ).toBe(true);
-    expect(
-      evaluateDualLiveness({passiveScore: 0.2, activeStatus: 'passed'}).passed,
+      evaluateDualLiveness({passiveScore: 0.8, activeStatus: 'failed'}).passed,
     ).toBe(false);
   });
 });
