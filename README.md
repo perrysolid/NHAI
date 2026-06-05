@@ -1,30 +1,24 @@
 <div align="center">
 
-# Datalake Face Auth
+<img src="docs/assets/banner.svg" alt="Datalake Face Auth — secure offline facial recognition and liveness detection" width="920" />
 
-### Secure offline facial recognition + liveness detection for field personnel in zero-network zones
+<br/><br/>
 
-**NHAI Innovation Hackathon 7.0 — Datalake 3.0**
+![React Native](https://img.shields.io/badge/React_Native-0.74-20232a?style=for-the-badge&logo=react)
+![Android](https://img.shields.io/badge/Android_8.0+-3ddc84?style=for-the-badge&logo=android&logoColor=white)
+![iOS](https://img.shields.io/badge/iOS_13.4+-000000?style=for-the-badge&logo=apple)
+![Offline](https://img.shields.io/badge/Auth-100%25_offline-38e0a5?style=for-the-badge)
+![Models](https://img.shields.io/badge/Models-~10.7_MB-38e0a5?style=for-the-badge)
 
-![React Native](https://img.shields.io/badge/React_Native-0.74-20232a?logo=react)
-![Android](https://img.shields.io/badge/Android-8.0%2B-3ddc84?logo=android&logoColor=white)
-![iOS](https://img.shields.io/badge/iOS-13.4%2B-000000?logo=apple)
-![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
-![Offline](https://img.shields.io/badge/Auth-100%25_offline-38e0a5)
-![Models](https://img.shields.io/badge/Models-~10.7_MB-38e0a5)
-![License](https://img.shields.io/badge/Licenses-MIT_%2F_Apache--2.0-blue)
+### &nbsp;[▶ Live demo](https://nhai-three.vercel.app)&nbsp; · &nbsp;[⬇ Download APK](https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk)&nbsp; · &nbsp;[Dashboard](https://datalake-face-sync.onrender.com/admin)&nbsp; · &nbsp;[Demo video](https://drive.google.com/drive/folders/14rTxUjJ_Wrdt349yWkksgE51m87zO97d?usp=sharing)&nbsp;
 
-**Primary deliverable:** a cross-platform **React Native app (Android + iOS)** that authenticates entirely offline.
-
-**Direct Android APK:** https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
-
-[Package notes](docs/deliverables/README.md)
+<sub>NHAI Innovation Hackathon 7.0 · Datalake 3.0 &nbsp;|&nbsp; MIT / Apache-2.0 &nbsp;|&nbsp; [package notes](docs/deliverables/README.md)</sub>
 
 </div>
 
 ---
 
-> **Note for judges.** The mandatory, spec-compliant solution is the **React Native app** in [`app/`](app) — it runs face detection, liveness and recognition fully on-device using bundled TFLite models.
+> **Note for judges.** The mandatory, spec-compliant deliverable is the **React Native app** in [`app/`](app) — it runs face detection, a randomized liveness challenge, and recognition **fully on-device** with bundled TFLite models. The **Vercel browser app** mirrors the same pipeline for instant demonstration (no install).
 
 ## The problem
 
@@ -37,7 +31,7 @@ flowchart LR
   subgraph DEVICE["DEVICE — fully offline, on-device"]
     CAM[Camera] --> DET[Face detection - ML Kit]
     DET --> GATE[Quality gates<br/>one face / pose / lighting]
-    GATE --> LIVE[Liveness<br/>passive MiniFASNet + active blink/smile/turn]
+    GATE --> LIVE[Liveness<br/>passive MiniFASNet + randomized blink/smile/head-turn]
     LIVE --> REC[Recognition<br/>EdgeFace / MobileFaceNet TFLite]
     REC --> SCORE[Composite Authentication Score]
     SCORE --> Q[(Encrypted local queue)]
@@ -59,7 +53,7 @@ The cloud side is **only** an offline→online sync target plus an admin dashboa
 flowchart TD
   A[Position face] --> B{Quality gates pass?}
   B -- no --> A
-  B -- yes --> C[Active liveness challenge<br/>blink / smile / turn]
+  B -- yes --> C[Randomized liveness<br/>blink + smile + head-turn, random order]
   C -- fail/timeout --> X[Presentation attack blocked<br/>record + counter]
   C -- pass --> D[Compute 512-d embedding]
   D --> E[Cosine match vs enrolled template]
@@ -177,6 +171,37 @@ cd backend && npm install && npm run build && npm start
 - **Backend → Render:** one-click via [`render.yaml`](render.yaml); the public admin route is passcode-protected.
 - **Backend → AWS:** App Runner / Elastic Beanstalk / ECS / EC2 via [`backend/Dockerfile`](backend/Dockerfile) + [`backend/apprunner.yaml`](backend/apprunner.yaml). See [`docs/AWS_DEPLOYMENT.md`](docs/AWS_DEPLOYMENT.md).
 - Full steps: [`docs/WEB_RENDER_DEPLOYMENT.md`](docs/WEB_RENDER_DEPLOYMENT.md).
+
+## Demo Routes And Keys
+
+The public Vercel demo is a single-page app with direct routes enabled in
+[`web/vercel.json`](web/vercel.json), so these URLs can be shared with judges:
+
+| Route | Purpose |
+|-------|---------|
+| `/` | Live browser authentication demo: enroll, liveness, verify, queue, sync |
+| `/operations` | Demo operations view: pending queue, enrollments, sync posture |
+| `/deployment` | Vercel + backend deployment settings and runtime checks |
+| `/aws` | AWS-specific setup: App Runner/RDS routes, secrets, client key placement |
+
+Backend routes are the same on AWS or Render:
+
+| Backend route | Auth | Purpose |
+|---------------|------|---------|
+| `GET /health` | none | AWS/Render health check |
+| `POST /api/sync` | `x-api-key` when `API_KEY` is set | Receive verified attendance records |
+| `GET /api/records` | `x-api-key` when `API_KEY` is set | Return recent synced records |
+| `GET /admin?key=ADMIN_PASSCODE` | `ADMIN_PASSCODE` query key | Operations dashboard |
+
+Where to add keys and cloud URLs:
+
+| Target | File or environment | Values |
+|--------|---------------------|--------|
+| Vercel frontend | Vercel project env vars | `VITE_SYNC_URL=https://<aws-or-render-backend>` and `VITE_SYNC_KEY=<same as API_KEY>` |
+| AWS backend | App Runner / ECS / EB env vars | `API_KEY`, `ADMIN_PASSCODE`, `CORS_ORIGIN=https://<vercel-app>.vercel.app`, optional `DATABASE_URL` |
+| Render backend | Render env vars | same as AWS backend |
+| Native app | [`app/src/config.ts`](app/src/config.ts) | `SYNC.url=https://<backend>/api/sync`, `SYNC.apiKey=<same as API_KEY>` |
+| Browser defaults | [`web/src/lib/config.ts`](web/src/lib/config.ts) | local fallback only; production values should come from Vercel env vars |
 
 ## Verification status
 

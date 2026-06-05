@@ -9,7 +9,7 @@ import {LIVENESS} from '../lib/config';
 import {LIVENESS_TEXT, pick} from '../lib/i18n';
 import type {FaceSignals} from './pipeline';
 
-export type ChallengeKind = 'blink' | 'smile' | 'turn' | 'nod';
+export type ChallengeKind = 'blink' | 'smile' | 'turn';
 export type LivenessStatus = 'idle' | 'running' | 'passed' | 'failed';
 
 
@@ -43,18 +43,16 @@ export class LivenessChallenge {
   private blinkOpenEar = 0;
   private blinkMinEar = Number.POSITIVE_INFINITY;
   private turnBaselineYaw: number | null = null;
-  private nodBaselinePitch: number | null = null;
 
   constructor(rng: () => number = Math.random, fixedSteps?: ChallengeKind[]) {
     if (fixedSteps && fixedSteps.length) {
       this.challenges = fixedSteps;
       return;
     }
-    // Randomized 3-layer challenge: blink + head-turn are always required, plus
-    // a random third (smile or nod), in a RANDOM order chosen live. A
-    // pre-recorded video cannot comply with an order it did not anticipate.
-    const third: ChallengeKind = shuffle<ChallengeKind>(['smile', 'nod'], rng)[0];
-    this.challenges = shuffle<ChallengeKind>(['blink', 'turn', third], rng);
+    // Randomized challenge over three actions — blink, smile and a head turn —
+    // demanded one at a time in a RANDOM order chosen live. A pre-recorded video
+    // cannot comply with an order it did not anticipate.
+    this.challenges = shuffle<ChallengeKind>(['blink', 'smile', 'turn'], rng);
   }
 
   start(now: number): void {
@@ -69,7 +67,6 @@ export class LivenessChallenge {
     this.blinkOpenEar = 0;
     this.blinkMinEar = Number.POSITIVE_INFINITY;
     this.turnBaselineYaw = null;
-    this.nodBaselinePitch = null;
   }
 
   private current(): ChallengeKind {
@@ -118,14 +115,6 @@ export class LivenessChallenge {
         }
         return (
           Math.abs(s.yawDeg - this.turnBaselineYaw) >= LIVENESS.headTurnDeltaDeg
-        );
-      case 'nod':
-        if (this.nodBaselinePitch === null) {
-          this.nodBaselinePitch = s.pitchDeg;
-        }
-        return (
-          Math.abs(s.pitchDeg - this.nodBaselinePitch) >=
-          LIVENESS.nodPitchDeltaDeg
         );
     }
   }

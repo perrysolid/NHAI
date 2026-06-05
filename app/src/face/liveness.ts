@@ -2,7 +2,7 @@ import {THRESHOLDS} from '../config';
 import {LIVENESS_TEXT, pick} from '../i18n';
 import type {Face} from '../camera/types';
 
-export type ActiveChallengeKind = 'blink' | 'turn' | 'smile' | 'nod';
+export type ActiveChallengeKind = 'blink' | 'turn' | 'smile';
 export type LivenessStatus = 'idle' | 'running' | 'passed' | 'failed';
 
 export interface LivenessSnapshot {
@@ -24,17 +24,18 @@ function shuffle<T>(items: T[], rng: () => number): T[] {
 }
 
 /**
- * Three-layer active liveness with a randomized challenge sequence.
+ * Randomized active liveness over three quick actions: blink, smile and a head
+ * turn (left/right), demanded one at a time in a RANDOM order each attempt.
  *
- *  - blink is ALWAYS included and requires a full open -> closed -> open cycle
- *    (a static photo of open eyes never closes; of closed eyes never opens)
- *  - head turn is ALWAYS included (yaw must swing from the frontal baseline)
- *  - a random third action (smile or nod) and a RANDOM ORDER are demanded live
+ *  - blink requires a full open -> closed -> open cycle (a static photo of open
+ *    eyes never closes; of closed eyes never opens)
+ *  - smile and head-turn add expression/pose checks
  *
- * Because the exact sequence is chosen per attempt and gated step-by-step, a
- * pre-recorded video on a phone cannot satisfy it — the recording cannot match
- * an order it did not anticipate. On native this stacks with the passive
- * MiniFASNet anti-spoof for replay/screen defense.
+ * Because the order is chosen per attempt and gated step-by-step, a pre-recorded
+ * video on a phone cannot satisfy it — the recording cannot match an order it
+ * did not anticipate. On native this stacks with the passive MiniFASNet
+ * anti-spoof for replay/screen defense. Fully offline; no network, no extra
+ * model. The recognition + match compute itself stays under a second.
  */
 export class ActiveLivenessChallenge {
   private status: LivenessStatus = 'idle';
@@ -45,7 +46,6 @@ export class ActiveLivenessChallenge {
   private blinkPhase: 'await_open' | 'await_close' | 'await_reopen' =
     'await_open';
   private baselineYaw: number | null = null;
-  private baselinePitch: number | null = null;
   // motion evidence over the whole attempt
   private minEye = 1;
   private maxEye = 0;
@@ -57,9 +57,8 @@ export class ActiveLivenessChallenge {
     if (fixedSteps && fixedSteps.length) {
       this.challenges = fixedSteps;
     } else {
-      const third = shuffle<ActiveChallengeKind>(['smile', 'nod'], rng)[0];
       this.challenges = shuffle<ActiveChallengeKind>(
-        ['blink', 'turn', third],
+        ['blink', 'smile', 'turn'],
         rng,
       );
     }
@@ -138,7 +137,6 @@ export class ActiveLivenessChallenge {
   private resetStep(): void {
     this.blinkPhase = 'await_open';
     this.baselineYaw = null;
-    this.baselinePitch = null;
   }
 
   private isCurrentSatisfied(face: Face): boolean {
@@ -168,15 +166,6 @@ export class ActiveLivenessChallenge {
         return (
           Math.abs(face.yawAngle - this.baselineYaw) >=
           THRESHOLDS.headTurnDeltaDeg
-        );
-      }
-      case 'nod': {
-        if (this.baselinePitch === null) {
-          this.baselinePitch = face.pitchAngle;
-        }
-        return (
-          Math.abs(face.pitchAngle - this.baselinePitch) >=
-          THRESHOLDS.nodPitchDeltaDeg
         );
       }
     }

@@ -18,12 +18,10 @@ const open = face({leftEyeOpenProbability: 1, rightEyeOpenProbability: 1});
 const closed = face({leftEyeOpenProbability: 0, rightEyeOpenProbability: 0});
 
 describe('active liveness (3-layer randomized)', () => {
-  it('always demands a blink plus a head turn', () => {
+  it('demands blink, smile and head-turn in a random order', () => {
     const c = new ActiveLivenessChallenge();
     const snap = c.start(0);
-    expect(snap.challenges).toContain('blink');
-    expect(snap.challenges).toContain('turn');
-    expect(snap.challenges.length).toBe(3);
+    expect([...snap.challenges].sort()).toEqual(['blink', 'smile', 'turn']);
   });
 
   it('passes a blink on a full open-close-open cycle', () => {
@@ -45,12 +43,8 @@ describe('active liveness (3-layer randomized)', () => {
     ).toBe('failed');
   });
 
-  it('completes a full blink -> turn -> nod sequence in order', () => {
-    const c = new ActiveLivenessChallenge(Math.random, [
-      'blink',
-      'turn',
-      'nod',
-    ]);
+  it('completes a full blink -> turn sequence in order', () => {
+    const c = new ActiveLivenessChallenge(Math.random, ['blink', 'turn']);
     c.start(0);
     c.update(open, 100);
     c.update(closed, 200);
@@ -58,11 +52,7 @@ describe('active liveness (3-layer randomized)', () => {
     c.update(face({yawAngle: 0}), 400); // turn baseline (frontal)
     expect(
       c.update(face({yawAngle: THRESHOLDS.headTurnDeltaDeg + 5}), 500).status,
-    ).toBe('running'); // turn done
-    c.update(face({pitchAngle: 0}), 600); // nod baseline (frontal)
-    expect(
-      c.update(face({pitchAngle: THRESHOLDS.nodPitchDeltaDeg + 5}), 700).status,
-    ).toBe('passed'); // nod done
+    ).toBe('passed'); // turn done -> all complete
   });
 
   it('fails when the demanded order is not followed (replay defense)', () => {

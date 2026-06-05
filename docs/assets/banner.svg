@@ -1,0 +1,67 @@
+<svg width="1280" height="340" viewBox="0 0 1280 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Datalake Face Auth">
+  <defs>
+    <radialGradient id="glow" cx="80%" cy="0%" r="80%">
+      <stop offset="0%" stop-color="#38e0a5" stop-opacity="0.16"/>
+      <stop offset="55%" stop-color="#38e0a5" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="line" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#38e0a5" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#38e0a5" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#38e0a5" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="340" fill="#07090b"/>
+  <rect width="1280" height="340" fill="url(#glow)"/>
+
+  <!-- faint blueprint grid -->
+  <g stroke="#5a7884" stroke-opacity="0.06" stroke-width="1">
+    <line x1="0" y1="56" x2="1280" y2="56"/>
+    <line x1="0" y1="113" x2="1280" y2="113"/>
+    <line x1="0" y1="170" x2="1280" y2="170"/>
+    <line x1="0" y1="227" x2="1280" y2="227"/>
+    <line x1="0" y1="284" x2="1280" y2="284"/>
+    <line x1="160" y1="0" x2="160" y2="340"/>
+    <line x1="320" y1="0" x2="320" y2="340"/>
+    <line x1="480" y1="0" x2="480" y2="340"/>
+    <line x1="960" y1="0" x2="960" y2="340"/>
+    <line x1="1120" y1="0" x2="1120" y2="340"/>
+  </g>
+
+  <!-- corner reticle brackets -->
+  <g fill="#38e0a5">
+    <rect x="40" y="40" width="46" height="4"/><rect x="40" y="40" width="4" height="46"/>
+    <rect x="1194" y="40" width="46" height="4"/><rect x="1236" y="40" width="4" height="46"/>
+    <rect x="40" y="296" width="46" height="4"/><rect x="40" y="254" width="4" height="46"/>
+    <rect x="1194" y="296" width="46" height="4"/><rect x="1236" y="254" width="4" height="46"/>
+  </g>
+
+  <!-- scan ring on the right -->
+  <g transform="translate(1050,170)" fill="none" stroke="#38e0a5">
+    <ellipse cx="0" cy="0" rx="120" ry="138" stroke-opacity="0.22" stroke-width="2"/>
+    <ellipse cx="0" cy="0" rx="86" ry="100" stroke-opacity="0.12" stroke-width="2"/>
+    <line x1="-130" y1="0" x2="130" y2="0" stroke-opacity="0.5" stroke-width="2"/>
+  </g>
+
+  <!-- brand mark -->
+  <g transform="translate(96,118)" fill="#38e0a5">
+    <rect x="0" y="0" width="34" height="15"/>
+    <rect x="0" y="20" width="15" height="15"/>
+    <rect x="19" y="20" width="15" height="15" fill="#1e7d5c"/>
+  </g>
+
+  <text x="150" y="120" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="16" letter-spacing="4" fill="#38e0a5">NHAI · DATALAKE 3.0</text>
+  <text x="148" y="186" font-family="Segoe UI,Helvetica,Arial,sans-serif" font-size="62" font-weight="700" fill="#dbe4e8">Datalake Face Auth</text>
+  <text x="150" y="226" font-family="Segoe UI,Helvetica,Arial,sans-serif" font-size="22" fill="#8b97a5">Secure offline facial recognition + liveness detection</text>
+  <text x="150" y="256" font-family="Segoe UI,Helvetica,Arial,sans-serif" font-size="22" fill="#8b97a5">for field personnel in zero-network zones</text>
+
+  <!-- chips -->
+  <g font-family="ui-monospace,Menlo,Consolas,monospace" font-size="14" fill="#38e0a5">
+    <rect x="150" y="278" width="150" height="32" rx="6" fill="#0d1216" stroke="#25323b"/>
+    <text x="168" y="299">100% OFFLINE</text>
+    <rect x="312" y="278" width="160" height="32" rx="6" fill="#0d1216" stroke="#25323b"/>
+    <text x="330" y="299">ON-DEVICE TFLITE</text>
+    <rect x="484" y="278" width="196" height="32" rx="6" fill="#0d1216" stroke="#25323b"/>
+    <text x="502" y="299">REACT NATIVE · ANDROID + iOS</text>
+  </g>
+</svg>

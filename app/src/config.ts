@@ -112,8 +112,8 @@ export const THRESHOLDS = {
   /** Minimum range the eye-open signal must span during a verify attempt — a
    *  real blink swings ~0.8; a held photo stays flat. Defeats static spoofs. */
   livenessMotionRange: 0.3,
-  /** Active-challenge window (generous so real users complete it). */
-  activeChallengeTimeoutMs: 9000,
+  /** Active-challenge window (generous so real users complete all 3 actions). */
+  activeChallengeTimeoutMs: 10000,
   /** Quality gates — advisory guidance, kept forgiving for field use. */
   maxYawDeg: 36,
   maxPitchDeg: 36,
@@ -125,8 +125,6 @@ export const THRESHOLDS = {
   blinkOpenProb: 0.65,
   smileProb: 0.6,
   headTurnDeltaDeg: 12,
-  /** Nod challenge: required head pitch swing from the frontal baseline. */
-  nodPitchDeltaDeg: 11,
   /** Enrollment captures averaged into one template. */
   enrollSamples: 3,
 } as const;
