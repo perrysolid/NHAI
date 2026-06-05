@@ -30,7 +30,7 @@ export const FLAGS = {
 export type RecognitionModelId = 'edgeface_s' | 'mobilefacenet' | 'facenet_512';
 
 /** Active recognition model — swap this one line to change the engine. */
-export const ACTIVE_RECOGNITION: RecognitionModelId = 'facenet_512';
+export const ACTIVE_RECOGNITION: RecognitionModelId = 'mobilefacenet';
 
 export interface RecognitionSpec {
   /** require()'d asset, resolved lazily in FaceEngine to keep config pure. */
@@ -64,7 +64,7 @@ export const RECOGNITION_MODELS: Record<RecognitionModelId, RecognitionSpec> = {
     channels: 3,
     mean: [0.5, 0.5, 0.5],
     std: [0.5, 0.5, 0.5],
-    embeddingLength: 512,
+    embeddingLength: 192,
     dtype: 'float32',
   },
   // Bundled runnable fallback for the demo while EdgeFace-S is converted.

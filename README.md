@@ -31,7 +31,7 @@ target and admin dashboard — never in the auth path.
 - **EdgeFace-S** — recognition, 99.73% LFW @ 1.77M params (IJCB'23 compact-track winner)
 - **MobileFaceNet** — proven fallback behind the same `FaceEngine` interface
 - **MiniFASNetV2-SE** — passive anti-spoof, paired with an active blink/smile/turn challenge
-- **FaceNet-512** — bundled runnable demo recognition model while EdgeFace is converted
+- **MobileFaceNet** — bundled compact runnable demo recognition model
 
 See `app/assets/models/README.md` for download + netron-verify steps.
 
@@ -78,7 +78,7 @@ The browser demo keeps face inference local in the browser and only syncs verifi
 attendance records. Deployment steps are in
 [`docs/WEB_RENDER_DEPLOYMENT.md`](docs/WEB_RENDER_DEPLOYMENT.md).
 
-> Native model note: the app now bundles FaceNet-512 + MiniFASNet `.tflite`
-> assets and a `react-native-fast-tflite` engine. FaceNet-512 is larger than the
-> target hackathon footprint; swap `ACTIVE_RECOGNITION` to `edgeface_s` after
-> converting EdgeFace-S to TFLite INT8 for the compact final build.
+> Native model note: the app now bundles MobileFaceNet + MiniFASNet `.tflite`
+> assets and a `react-native-fast-tflite` engine. Combined model assets are about
+> 10.7 MB; swap `ACTIVE_RECOGNITION` to `edgeface_s` after converting EdgeFace-S
+> to TFLite INT8 for an even smaller final build.

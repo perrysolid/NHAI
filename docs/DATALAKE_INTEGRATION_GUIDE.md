@@ -26,7 +26,7 @@ The backend is never part of the authentication decision.
 
 The runnable native demo already includes:
 
-- `facenet_512.tflite`
+- `mobilefacenet.tflite`
 - `minifasnet.tflite`
 
 For the compact production target, add:
