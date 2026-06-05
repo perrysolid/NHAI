@@ -5,8 +5,9 @@ On-device offline auth (React Native) + Vercel web demo + Render sync backend.
 **Constraints:** React Native (Android+iOS) · 100% offline auth · <1s · >95% acc ·
 ~20MB models · Android 8+/iOS 12+ · 3GB RAM · CPU-only · open-source.
 
-**One line:** recognition + liveness run on-device & offline; Vercel hosts only the
-offline→online sync target + admin dashboard (never in the auth path).
+**One line:** recognition + liveness run on-device & offline; Vercel hosts the
+browser demo, and Render hosts only the offline→online sync target + admin
+dashboard (never in the auth path).
 
 ## Architecture
 ```
@@ -17,9 +18,9 @@ active challenge) → Recognition (EdgeFace) → cosine match → encrypted loca
 RENDER (online): POST /api/sync → validate → Postgres → 200 OK → device PURGES.
 /admin dashboard (optional Gemini summary + Groq NL query).
 ```
-Why not models on Vercel: the rubric scores offline operation (airplane-mode test);
-serverless cold-starts + payload limits make vision inference unreliable. Vercel's
-honest role is the *sync* half.
+Why not server-side models: the rubric scores offline operation (airplane-mode
+test); serverless cold-starts + payload limits make vision inference unreliable.
+The honest online role is only the sync/admin half.
 
 ## Models (on-device footprint < 20 MB)
 - **EdgeFace-S** (George et al., TBIOM 2024) — IJCB'23 Efficient FR Competition
@@ -51,11 +52,12 @@ via `DATABASE_URL` · `POST /api/sync` · `GET /api/records` (auth-gated) ·
 1. Get models; verify exact I/O in netron.app (prevents #1 runtime bug).
 2. Scaffold → blank camera preview RUNS on Android (go/no-go gate).  ← **Phase 1**
 3. Face detection + quality gates (one face, ±30° pose, brightness).
-4. FaceEngine: load EdgeFace + MiniFASNet; resize-plugin → correct input buffers.
+4. FaceEngine: interface + model manifest + mock fallback are in code; real
+   EdgeFace/MiniFASNet `.tflite` assets still need final native runtime wiring.
 5. Liveness: passive >0.7 AND active challenge within timeout.
 6. Enroll (avg 3 embeddings) + verify (cosine ≥0.55) + encrypted MMKV queue.
-7. Sync client: online → POST queue → on 200 purge.
-8. CLAHE/torch lighting; Benchmark screen.
+7. Sync client: online → POST queue to Render → on 200 purge.
+8. Lighting robustness + benchmark helpers.
 
 ## Build order — Track B (parallel)
 1. Vercel web demo with browser camera, local enroll/verify, active liveness, and sync queue.
@@ -69,8 +71,8 @@ full sync→purge lifecycle before the backend is live.
 - Working prototype + source (Android demo; iOS = same codebase) → Feasibility 30
 - Offline liveness (passive MiniFASNet + active blink/smile/turn) → Innovation 30
 - INT8 EdgeFace, size benchmark documented → Innovation 30
-- Sync & purge to Vercel, lighting robustness (CLAHE/torch) → Scalability 20
-- Source + integration guide + PPTX deck → Presentation 20
+- Sync & purge to Render, lighting robustness (CLAHE/torch) → Scalability 20
+- Source + integration guide → Presentation 20
 
 ## Demo script (90s, airplane mode throughout)
 1. Airplane mode on — "fully offline".

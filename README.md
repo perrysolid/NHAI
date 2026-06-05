@@ -1,9 +1,9 @@
 # DatalakeFaceAuth — Offline On-Device Face Auth for NHAI Datalake 3.0
 
 On-device, **100% offline** face recognition + liveness (React Native, Android &
-iOS). Recognition + liveness run entirely on the device; a Vercel backend is used
-**only** as the offline→online sync target and admin dashboard — never in the auth
-path.
+iOS). Recognition + liveness run entirely on the device. The browser demo deploys
+to Vercel, while a Render backend is used **only** as the offline→online sync
+target and admin dashboard — never in the auth path.
 
 ```
         ┌──────────────────── DEVICE (offline, scored) ────────────────────┐
@@ -12,7 +12,7 @@ path.
         └─────────────────────────────┬────────────────────────────────────┘
                                        │  (only when network returns)
                                        ▼
-        ┌──────────────────── VERCEL (online, not in auth path) ───────────┐
+        ┌──────────────────── RENDER (online, not in auth path) ───────────┐
         │ POST /api/sync → validate → Postgres → 200 OK → device PURGES     │
         │ /admin dashboard (optional Gemini summary + Groq NL query)        │
         └──────────────────────────────────────────────────────────────────┘
@@ -38,12 +38,12 @@ See `app/assets/models/README.md` for download + netron-verify steps.
 - [x] **Phase 1** — scaffold; front-camera preview runs before any ML
 - [x] **Phase 2** — face detection + quality gates (one face, ±30° pose, brightness, live guidance)
 - [x] **Phase 3 web demo** — Vercel-ready browser face auth + Render sync backend
-- [ ] Phase 3 native — FaceEngine (EdgeFace + MiniFASNet inference)
-- [ ] Phase 4 — dual liveness (passive + active)
-- [ ] Phase 5 — enroll + verify + encrypted MMKV store
-- [ ] Phase 6 — sync & purge to Vercel
-- [ ] Phase 7 — robustness (CLAHE/torch) + benchmark screen
-- [ ] Phase 8 — README + Datalake 3.0 integration guide
+- [x] **Phase 3 native** — FaceEngine interface, model manifest, deterministic mock fallback
+- [x] **Phase 4** — dual liveness logic (passive score + active blink/smile/turn)
+- [x] **Phase 5** — enroll + verify + encrypted MMKV-backed store
+- [x] **Phase 6** — sync & purge client for Render backend
+- [x] **Phase 7** — lighting robustness + benchmark helpers
+- [x] **Phase 8** — README + Datalake 3.0 integration guide
 
 ## Run the app (Phase 1)
 ```bash
@@ -56,6 +56,8 @@ npx react-native run-android
 > iOS builds need CocoaPods (not installed here) but share the same JS codebase.
 
 Full plan: [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
+Integration guide:
+[`docs/DATALAKE_INTEGRATION_GUIDE.md`](docs/DATALAKE_INTEGRATION_GUIDE.md).
 
 ## Run the web demo + sync backend
 ```bash
@@ -74,3 +76,8 @@ npm run dev
 The browser demo keeps face inference local in the browser and only syncs verified
 attendance records. Deployment steps are in
 [`docs/WEB_RENDER_DEPLOYMENT.md`](docs/WEB_RENDER_DEPLOYMENT.md).
+
+> Native model note: the app code now has the FaceEngine contract and tested
+> enrollment/liveness/sync pipeline. Real EdgeFace/MiniFASNet `.tflite` assets
+> still need to be dropped into `app/assets/models/` and wired to
+> `react-native-fast-tflite` for production inference.

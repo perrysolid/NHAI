@@ -130,8 +130,8 @@ export const CAMERA = {
 // Sync (offline → online). NEVER referenced in the auth path.
 // ────────────────────────────────────────────────────────────────────────────
 export const SYNC = {
-  /** Vercel endpoint. Filled in once Track B is deployed. */
-  url: 'https://YOUR-VERCEL-APP.vercel.app/api/sync',
+  /** Render endpoint. Filled in once Track B is deployed. */
+  url: 'https://YOUR-RENDER-SERVICE.onrender.com/api/sync',
   /** Shared secret sent as x-api-key. Move to secure storage for production. */
   apiKey: 'CHANGE_ME',
   batchSize: 50,
