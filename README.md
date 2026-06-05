@@ -15,7 +15,10 @@
 ![License](https://img.shields.io/badge/Licenses-MIT_%2F_Apache--2.0-blue)
 
 **Primary deliverable:** a cross-platform **React Native app (Android + iOS)** that authenticates entirely offline.
-**Judge mobile package:** [**Download Android APK**](https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk) · [package notes](docs/deliverables/README.md)
+
+**Direct Android APK:** https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
+
+[Package notes](docs/deliverables/README.md)
 
 **Optional browser demo:** [Try the demo](https://nhai-three.vercel.app)
 
@@ -125,7 +128,7 @@ Weights live in `config.ts` (`SCORING`) and are identical on native and web (`ap
 
 Android release APKs are included in [`docs/deliverables/`](docs/deliverables). Judges can use the single universal APK directly:
 
-[**Download Android APK**](https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk)
+**Direct APK link:** https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
 
 | Platform | File | Use |
 |----------|------|-----|
