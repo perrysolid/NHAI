@@ -10,7 +10,7 @@
 ![Offline](https://img.shields.io/badge/Auth-100%25_offline-38e0a5?style=for-the-badge)
 ![Models](https://img.shields.io/badge/Models-~10.7_MB-38e0a5?style=for-the-badge)
 
-### &nbsp;[▶ Live demo](https://nhai-three.vercel.app)&nbsp; · &nbsp;[⬇ Download APK](https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk)&nbsp; · &nbsp;[Dashboard](https://datalake-face-sync.onrender.com/admin)&nbsp; · &nbsp;[Demo video](https://drive.google.com/drive/folders/14rTxUjJ_Wrdt349yWkksgE51m87zO97d?usp=sharing)&nbsp;
+### &nbsp;[▶ Live demo](https://nhai-three.vercel.app)&nbsp; · &nbsp;[⬇ Download APK](https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk)&nbsp; · &nbsp;[Demo video](https://drive.google.com/drive/folders/14rTxUjJ_Wrdt349yWkksgE51m87zO97d?usp=sharing)&nbsp;
 
 <sub>NHAI Innovation Hackathon 7.0 · Datalake 3.0 &nbsp;|&nbsp; MIT / Apache-2.0 &nbsp;|&nbsp; [package notes](docs/deliverables/README.md)</sub>
 
@@ -19,6 +19,15 @@
 ---
 
 > **Note for judges.** The mandatory, spec-compliant deliverable is the **React Native app** in [`app/`](app) — it runs face detection, a randomized liveness challenge, and recognition **fully on-device** with bundled TFLite models. The **Vercel browser app** mirrors the same pipeline for instant demonstration (no install).
+
+## Judges flow (NHAI Hackathon 7.0)
+
+1. **Install** the offline APK on any Android 8+ phone — [download](https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk) (`adb install -r ...universal-release.apk`).
+2. **Enroll** — tap *Enroll*, enter or generate an inspector ID, hold your face in the circle. Samples auto-capture and the template is saved **on the phone**.
+3. **Verify** — tap *Verify* and complete the random liveness prompts (**blink / smile / turn**, random order). Match returns in **< 1s**, with an authentication score — all on-device.
+4. **Spoof test** — hold up a **photo or a video on another phone**: liveness is **rejected** (it can't complete the live random sequence).
+5. **Offline proof** — turn on **airplane mode** and repeat steps 2–3: enrolment and verification still work; nothing leaves the device.
+6. **No install?** Open the [browser demo](https://nhai-three.vercel.app) to try the same pipeline instantly. *(Demonstration only; the APK is the deliverable.)*
 
 ## The problem
 
@@ -41,11 +50,10 @@ flowchart LR
   subgraph CLOUD["AWS / Render — never in the auth path"]
     API --> DB[(Postgres / memory)]
     API --> PURGE[Device purges local queue]
-    DB --> DASH[Operations console + analytics]
   end
 ```
 
-The cloud side is **only** an offline→online sync target plus an admin dashboard. No recognition ever happens server-side; the device decides authentication entirely offline, then syncs the verified record and purges locally.
+The cloud side is **only** an offline→online sync target for the sync-and-purge step. No recognition ever happens server-side; the device decides authentication entirely offline, then syncs the verified record and purges locally.
 
 ## Authentication pipeline
 
@@ -104,7 +112,7 @@ Weights live in `config.ts` (`SCORING`) and are identical on native and web (`ap
 - **Bilingual voice prompts (English + हिन्दी)** — offline Web Speech API on web; static bilingual prompts on native. No translation API, no network.
 - **Verifiable offline proof** — a live "Auth network: 0 calls" counter shows zero network requests during authentication.
 - **On-device latency budget** — recognize + match milliseconds shown per verification, proving the `<1 s` target.
-- **Presentation-attack KPI** — blocked liveness attempts counted on-device and on the dashboard.
+- **Presentation-attack counter** — blocked liveness attempts counted on-device.
 - **Operations-ready sync records** — verified records include score, latency, liveness, and inspection metrics for downstream analytics.
 
 ## Repository layout
@@ -113,7 +121,7 @@ Weights live in `config.ts` (`SCORING`) and are identical on native and web (`ap
 |------|------|-------|
 | [`app/`](app) | **Primary deliverable** — offline RN app (Android + iOS) | React Native 0.74, vision-camera, react-native-fast-tflite, ML Kit, MMKV |
 | [`web/`](web) | Optional browser mirror retained for development comparison | Vite + React, @vladmandic/face-api, Web Speech API |
-| [`backend/`](backend) | Sync target + operations dashboard (AWS / Render) | Node + Express, optional Postgres |
+| [`backend/`](backend) | Offline→online sync-and-purge target (AWS / Render) | Node + Express, optional Postgres |
 | [`docs/`](docs) | Plan, integration guide, methodology, deployment, alignment | — |
 
 ## Judge mobile package
@@ -168,7 +176,7 @@ cd backend && npm install && npm run build && npm start
 
 ## Deploy
 
-- **Backend → Render:** one-click via [`render.yaml`](render.yaml); the public admin route is passcode-protected.
+- **Backend → Render:** one-click via [`render.yaml`](render.yaml).
 - **Backend → AWS:** App Runner / Elastic Beanstalk / ECS / EC2 via [`backend/Dockerfile`](backend/Dockerfile) + [`backend/apprunner.yaml`](backend/apprunner.yaml). See [`docs/AWS_DEPLOYMENT.md`](docs/AWS_DEPLOYMENT.md).
 - Full steps: [`docs/WEB_RENDER_DEPLOYMENT.md`](docs/WEB_RENDER_DEPLOYMENT.md).
 
@@ -191,14 +199,13 @@ Backend routes are the same on AWS or Render:
 | `GET /health` | none | AWS/Render health check |
 | `POST /api/sync` | `x-api-key` when `API_KEY` is set | Receive verified attendance records |
 | `GET /api/records` | `x-api-key` when `API_KEY` is set | Return recent synced records |
-| `GET /admin?key=ADMIN_PASSCODE` | `ADMIN_PASSCODE` query key | Operations dashboard |
 
 Where to add keys and cloud URLs:
 
 | Target | File or environment | Values |
 |--------|---------------------|--------|
 | Vercel frontend | Vercel project env vars | `VITE_SYNC_URL=https://<aws-or-render-backend>` and `VITE_SYNC_KEY=<same as API_KEY>` |
-| AWS backend | App Runner / ECS / EB env vars | `API_KEY`, `ADMIN_PASSCODE`, `CORS_ORIGIN=https://<vercel-app>.vercel.app`, optional `DATABASE_URL` |
+| AWS backend | App Runner / ECS / EB env vars | `API_KEY`, `CORS_ORIGIN=https://<vercel-app>.vercel.app`, optional `DATABASE_URL` |
 | Render backend | Render env vars | same as AWS backend |
 | Native app | [`app/src/config.ts`](app/src/config.ts) | `SYNC.url=https://<backend>/api/sync`, `SYNC.apiKey=<same as API_KEY>` |
 | Browser defaults | [`web/src/lib/config.ts`](web/src/lib/config.ts) | local fallback only; production values should come from Vercel env vars |
@@ -215,7 +222,7 @@ Where to add keys and cloud URLs:
 
 - [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
 - [Datalake 3.0 integration guide](docs/DATALAKE_INTEGRATION_GUIDE.md)
-- [Drowsiness detection + operations console](docs/MONITORING_AND_DASHBOARD.md)
+- [Drowsiness & attention monitoring](docs/MONITORING_AND_DASHBOARD.md)
 - [NHAI hackathon alignment + honest gaps](docs/NHAI_HACKATHON_ALIGNMENT.md)
 - [AWS deployment](docs/AWS_DEPLOYMENT.md) · [Web + Render deployment](docs/WEB_RENDER_DEPLOYMENT.md)
 - [Test report](docs/TEST_REPORT.md)
