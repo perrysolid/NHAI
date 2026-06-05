@@ -10,14 +10,16 @@
 import {THRESHOLDS} from '../config';
 import type {Face, GateResult, GateStatus} from './types';
 
+// Short bilingual guidance (English / हिन्दी) for field personnel. Static
+// strings, so it works fully offline.
 const GUIDANCE: Record<GateStatus, string> = {
-  ok: 'Hold still…',
-  no_face: 'Center your face in the circle',
-  multiple_faces: 'Only one person in frame',
-  too_far: 'Move a little closer',
-  off_angle: 'Look straight at the camera',
-  too_dark: 'Too dark — find better light',
-  too_bright: 'Too bright — reduce glare',
+  ok: 'Hold still / स्थिर रहें',
+  no_face: 'Center your face / चेहरा बीच में रखें',
+  multiple_faces: 'One person only / केवल एक व्यक्ति',
+  too_far: 'Move closer / पास आएँ',
+  off_angle: 'Look straight / सीधा देखें',
+  too_dark: 'Too dark / रोशनी बढ़ाएँ',
+  too_bright: 'Too bright / चमक कम करें',
 };
 
 function result(status: GateStatus): GateResult {

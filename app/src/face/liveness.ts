@@ -13,10 +13,11 @@ export interface LivenessSnapshot {
   msLeft: number;
 }
 
+// Short bilingual prompts (English / हिन्दी). Static, offline-safe.
 const GUIDANCE: Record<ActiveChallengeKind, string> = {
-  blink: 'Blink once',
-  smile: 'Smile',
-  turn: 'Turn your head left or right',
+  blink: 'Blink / पलक झपकाएँ',
+  smile: 'Smile / मुस्कुराएँ',
+  turn: 'Turn your head / सिर घुमाएँ',
 };
 
 function shuffle<T>(items: T[], rng: () => number): T[] {

@@ -126,6 +126,32 @@ export const THRESHOLDS = {
 } as const;
 
 // ────────────────────────────────────────────────────────────────────────────
+// Drowsiness / attention monitoring (eye-landmark based, on-device)
+// ────────────────────────────────────────────────────────────────────────────
+export const DROWSINESS = {
+  earClosed: 0.21,
+  windowMs: 15000,
+  perclosDrowsy: 0.2,
+  sustainedClosureMs: 1100,
+  lookAwayYawDeg: 26,
+  highBlinkRate: 28,
+} as const;
+
+// ────────────────────────────────────────────────────────────────────────────
+// Composite authentication score — weighted aggregate of all signals (0..100)
+// ────────────────────────────────────────────────────────────────────────────
+export const SCORING = {
+  weights: {
+    recognition: 0.45,
+    liveness: 0.25,
+    alertness: 0.1,
+    pose: 0.1,
+    illumination: 0.1,
+  },
+  reviewBelow: 70,
+} as const;
+
+// ────────────────────────────────────────────────────────────────────────────
 // Camera / processing
 // ────────────────────────────────────────────────────────────────────────────
 export const CAMERA = {
@@ -149,6 +175,8 @@ export const config = {
   RECOGNITION_MODELS,
   LIVENESS_MODEL,
   THRESHOLDS,
+  DROWSINESS,
+  SCORING,
   CAMERA,
   SYNC,
 };
