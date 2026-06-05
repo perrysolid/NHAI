@@ -1,7 +1,7 @@
 # NHAI Innovation Hackathon 7.0 — Implementation Plan
 
-On-device offline auth (React Native) + Vercel web demo + AWS/Render-compatible
-sync backend.
+On-device offline auth that works well across React Native Android and iOS, plus
+a Vercel web demo and AWS/Render-compatible sync backend.
 
 **Constraints:** React Native (Android+iOS) · 100% offline auth · <1s · >95% acc ·
 ~20MB models · Android 8+/iOS 12+ · 3GB RAM · CPU-only · open-source.
@@ -72,7 +72,8 @@ Integration: Track A's `SYNC_URL` config + `MOCK_MODE` flag lets the device demo
 full sync→purge lifecycle before the backend is live.
 
 ## Deliverables (rubric-mapped)
-- Working prototype + source (Android demo; iOS = same codebase) → Feasibility 30
+- Working prototype + source (Android demo; iOS project and shared React Native
+  pipeline included) → Feasibility 30
 - Offline liveness (passive MiniFASNet + active blink/smile/turn) → Innovation 30
 - INT8 EdgeFace, size benchmark documented → Innovation 30
 - Sync & purge to AWS/Render endpoint, lighting robustness (CLAHE/torch) → Scalability 20

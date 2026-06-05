@@ -3,7 +3,9 @@
 ## Runtime Split
 
 - Native app: camera capture, face quality gates, liveness, recognition,
-  enrollment, verification, and queueing offline.
+  enrollment, verification, and queueing offline. The same React Native
+  app/service pipeline is used for Android and iOS, so the integration is built
+  to work well across both mobile platforms.
 - Vercel web demo: deployable browser version for judges to test without an
   Android device.
 - AWS/Render-compatible backend: receives already-verified attendance records

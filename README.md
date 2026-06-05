@@ -1,9 +1,10 @@
 # DatalakeFaceAuth — Offline On-Device Face Auth for NHAI Datalake 3.0
 
-On-device, **100% offline** face recognition + liveness (React Native, Android &
-iOS). Recognition + liveness run entirely on the device. The browser demo deploys
-to Vercel, while an AWS/Render-compatible backend is used **only** as the
-offline→online sync target and admin dashboard — never in the auth path.
+On-device, **100% offline** face recognition + liveness for React Native,
+Android, and iOS. The same offline auth pipeline works across the mobile app
+surface, with recognition + liveness running entirely on the device. The browser
+demo deploys to Vercel, while an AWS/Render-compatible backend is used **only**
+as the offline→online sync target and admin dashboard — never in the auth path.
 
 ```
         ┌──────────────────── DEVICE (offline, scored) ────────────────────┐
@@ -53,7 +54,8 @@ npm install
 npx react-native run-android
 ```
 > **Toolchain note:** RN 0.74 requires **JDK 17** (this machine currently has 11).
-> iOS builds need CocoaPods (not installed here) but share the same JS codebase.
+> The iOS project is included and shares the same offline JS/auth service
+> pipeline; install CocoaPods before producing the local iOS build.
 
 Full plan: [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
 Integration guide:

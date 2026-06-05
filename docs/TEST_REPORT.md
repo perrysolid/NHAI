@@ -35,6 +35,9 @@ Notes:
 - Android ABI splits are enabled for `armeabi-v7a` and `arm64-v8a`.
 - Dependency versions are pinned to match React Native 0.74 and the Android
   Gradle plugin used by the project.
+- The iOS project is included and uses the same React Native offline auth
+  services, model config, local store, and sync client; install CocoaPods before
+  producing the local iOS build.
 - FaceNet-512 is not bundled because its approximate 45 MB size misses the
   compact model target.
 
