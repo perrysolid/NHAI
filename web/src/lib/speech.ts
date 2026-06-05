@@ -10,6 +10,8 @@
  * real user gesture, so primeSpeech() must be called from a click/tap handler
  * before prompts fired from the frame loop will be audible.
  */
+import {speechLang} from './i18n';
+
 let enabled = false;
 let lastSpoken = '';
 let unlocked = false;
@@ -83,21 +85,15 @@ export function speak(text: string): void {
   synth.cancel();
   synth.resume();
 
-  const parts = text
-    .split('/')
-    .map(s => s.trim())
-    .filter(Boolean);
-  const langs = ['en-IN', 'hi-IN'];
-  parts.forEach((part, i) => {
-    const u = new SpeechSynthesisUtterance(part);
-    u.lang = langs[i] ?? 'en-IN';
-    const v = voiceForLang(u.lang);
-    if (v) {
-      u.voice = v;
-    }
-    u.rate = 0.98;
-    u.pitch = 1;
-    u.volume = 1;
-    synth.speak(u);
-  });
+  const lang = speechLang();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = lang;
+  const v = voiceForLang(lang);
+  if (v) {
+    u.voice = v;
+  }
+  u.rate = 0.98;
+  u.pitch = 1;
+  u.volume = 1;
+  synth.speak(u);
 }

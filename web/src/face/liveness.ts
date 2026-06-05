@@ -6,17 +6,12 @@
  * Pure & deterministic given the signal stream + clock, so it's unit-testable.
  */
 import {LIVENESS} from '../lib/config';
+import {LIVENESS_TEXT, pick} from '../lib/i18n';
 import type {FaceSignals} from './pipeline';
 
 export type ChallengeKind = 'blink' | 'smile' | 'turn';
 export type LivenessStatus = 'idle' | 'running' | 'passed' | 'failed';
 
-// Short bilingual prompts (English / हिन्दी). Static, offline-safe.
-const PROMPTS: Record<ChallengeKind, string> = {
-  blink: 'Blink / पलक झपकाएँ',
-  smile: 'Smile / मुस्कुराएँ',
-  turn: 'Turn your head / सिर घुमाएँ',
-};
 
 export interface LivenessSnapshot {
   status: LivenessStatus;
@@ -114,11 +109,11 @@ export class LivenessChallenge {
         : 0;
     let prompt = '';
     if (this.status === 'running') {
-      prompt = PROMPTS[this.current()];
+      prompt = pick(LIVENESS_TEXT[this.current()]);
     } else if (this.status === 'passed') {
-      prompt = 'Liveness confirmed / सत्यापित';
+      prompt = pick(LIVENESS_TEXT.passed);
     } else if (this.status === 'failed') {
-      prompt = 'Liveness failed / विफल — पुनः प्रयास';
+      prompt = pick(LIVENESS_TEXT.failed);
     }
     return {
       status: this.status,

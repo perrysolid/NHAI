@@ -37,6 +37,7 @@ import {
   isSpeechSupported,
   primeSpeech,
 } from './lib/speech';
+import {setLang, getLang, pick, UI_TEXT, type Lang} from './lib/i18n';
 import {useCamera} from './ui/useCamera';
 import {useFaceLoop} from './ui/useFaceLoop';
 import CameraStage from './ui/CameraStage';
@@ -79,6 +80,7 @@ export default function App() {
   const [mockSync, setMockSync] = useState<boolean>(FLAGS.MOCK_SYNC);
   const [online, setOnline] = useState<boolean>(navigator.onLine);
   const [voice, setVoice] = useState<boolean>(isSpeechSupported());
+  const [lang, setLangState] = useState<Lang>(getLang());
   const [authCalls, setAuthCalls] = useState(0);
   const [spoofBlocked, setSpoofBlocked] = useState(0);
 
@@ -112,9 +114,19 @@ export default function App() {
     setSpeechEnabled(next);
     if (next) {
       primeSpeech();
-      speak('Voice enabled / आवाज़ चालू');
+      speak(pick(UI_TEXT.voiceOn));
     }
   }, [voice]);
+
+  const toggleLang = useCallback(() => {
+    const next: Lang = lang === 'hi' ? 'en' : 'hi';
+    setLang(next);
+    setLangState(next);
+    if (voice) {
+      primeSpeech();
+      speak(pick(UI_TEXT.voiceOn));
+    }
+  }, [lang, voice]);
 
   useEffect(() => {
     const on = () => setOnline(true);
@@ -194,7 +206,7 @@ export default function App() {
       setAuthCalls(netMonitor.authCalls);
       setMode('idle');
       setResult({ok: true, label: 'Enrolled', detail: id});
-      speak('Enrolled / पंजीकृत');
+      speak(pick(UI_TEXT.enrolled));
       addLog(`Enrolled "${id}" · ${RECOGNITION.enrollSamples} samples averaged`);
       refreshData();
     },
@@ -203,10 +215,19 @@ export default function App() {
 
   const finishVerify = useCallback(
     async (video: HTMLVideoElement) => {
+      // Robustness: sample a few frames and keep the BEST (min-distance) match.
+      // This smooths out single-frame noise from glasses, motion and lighting,
+      // which matters for real-world / Indian-face captures. Still well under 1s.
       const tRec0 = performance.now();
-      const probe = await computeDescriptor(video);
+      const probes: Float32Array[] = [];
+      for (let i = 0; i < 3; i++) {
+        const d = await computeDescriptor(video);
+        if (d) {
+          probes.push(d);
+        }
+      }
       const recognizeMs = performance.now() - tRec0;
-      if (!probe) {
+      if (probes.length === 0) {
         netMonitor.endAuth();
         setAuthCalls(netMonitor.authCalls);
         setResult({ok: false, label: 'No face', detail: 'capture again'});
@@ -216,9 +237,12 @@ export default function App() {
       const tMatch0 = performance.now();
       let best: {id: string; distance: number} | null = null;
       for (const e of getEnrollments()) {
-        const m = matchDescriptor(probe, Float32Array.from(e.descriptor));
-        if (!best || m.distance < best.distance) {
-          best = {id: e.userId, distance: m.distance};
+        const tmpl = Float32Array.from(e.descriptor);
+        for (const probe of probes) {
+          const m = matchDescriptor(probe, tmpl);
+          if (!best || m.distance < best.distance) {
+            best = {id: e.userId, distance: m.distance};
+          }
         }
       }
       const matchMs = performance.now() - tMatch0;
@@ -276,7 +300,7 @@ export default function App() {
           score: composite.overall,
           components: composite.components,
         });
-        speak('Verified / सत्यापित');
+        speak(pick(UI_TEXT.verified));
         addLog(
           `Match "${best.id}" · dist ${best.distance.toFixed(3)} · ${
             inspection.drowsy ? 'DROWSY' : 'alert'
@@ -291,7 +315,7 @@ export default function App() {
           confidence: conf,
           latency,
         });
-        speak('No match / मेल नहीं');
+        speak(pick(UI_TEXT.noMatch));
         addLog('No matching enrollment');
       }
       netMonitor.endAuth();
@@ -390,7 +414,7 @@ export default function App() {
         netMonitor.endAuth();
         setAuthCalls(netMonitor.authCalls);
         setResult({ok: false, label: 'Liveness failed', detail: 'retry'});
-        speak('Liveness failed / विफल');
+        speak(snap.prompt);
         addLog('Liveness challenge failed · presentation attack blocked');
         setMode('idle');
         livenessRef.current = null;
@@ -472,6 +496,13 @@ export default function App() {
           </div>
         </div>
         <div className="sysmeta">
+          <button
+            className="voicebtn voicebtn--on"
+            onClick={toggleLang}
+            data-testid="lang"
+            title="Switch language">
+            {lang === 'hi' ? 'हिन्दी' : 'English'}
+          </button>
           {isSpeechSupported() && (
             <button
               className={`voicebtn ${voice ? 'voicebtn--on' : ''}`}

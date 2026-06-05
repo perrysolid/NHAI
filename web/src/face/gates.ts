@@ -3,6 +3,7 @@
  * qualityGates: exactly one face, close enough, frontal, well-lit. Pure.
  */
 import {GATES} from '../lib/config';
+import {GATE_TEXT, pick} from '../lib/i18n';
 import type {Observation} from './pipeline';
 
 export type GateStatus =
@@ -20,20 +21,9 @@ export interface GateResult {
   ready: boolean;
 }
 
-// Short bilingual guidance (English / हिन्दी) for field personnel. Static
-// strings — no translation API — so it works fully offline.
-const GUIDANCE: Record<GateStatus, string> = {
-  ok: 'Hold still / स्थिर रहें',
-  no_face: 'Center your face / चेहरा बीच में रखें',
-  multiple_faces: 'One person only / केवल एक व्यक्ति',
-  too_far: 'Move closer / पास आएँ',
-  off_angle: 'Look straight / सीधा देखें',
-  too_dark: 'Too dark / रोशनी बढ़ाएँ',
-  too_bright: 'Too bright / चमक कम करें',
-};
-
+// Guidance text comes from the active-language dictionary (offline, static).
 function r(status: GateStatus): GateResult {
-  return {status, guidance: GUIDANCE[status], ready: status === 'ok'};
+  return {status, guidance: pick(GATE_TEXT[status]), ready: status === 'ok'};
 }
 
 export function evaluate(

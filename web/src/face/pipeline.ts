@@ -36,9 +36,16 @@ export interface Observation {
   primary: FaceSignals | null;
 }
 
+// Live preview/gating: lighter for a smooth frame loop.
 const detectorOptions = new faceapi.TinyFaceDetectorOptions({
   inputSize: 320,
   scoreThreshold: 0.5,
+});
+// Recognition capture: higher input resolution + lower score threshold for more
+// accurate landmarks and descriptors (more robust on real-world / Indian faces).
+const captureOptions = new faceapi.TinyFaceDetectorOptions({
+  inputSize: 416,
+  scoreThreshold: 0.4,
 });
 
 function toPts(points: faceapi.Point[]): Pt[] {
@@ -89,7 +96,7 @@ export async function computeDescriptor(
   input: VisionInput,
 ): Promise<Float32Array | null> {
   const res = await faceapi
-    .detectSingleFace(input, detectorOptions)
+    .detectSingleFace(input, captureOptions)
     .withFaceLandmarks()
     .withFaceDescriptor();
   return res?.descriptor ?? null;
