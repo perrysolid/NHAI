@@ -125,6 +125,8 @@ export const THRESHOLDS = {
   blinkOpenProb: 0.65,
   smileProb: 0.6,
   headTurnDeltaDeg: 12,
+  /** Nod challenge: required head pitch swing from the frontal baseline. */
+  nodPitchDeltaDeg: 11,
   /** Enrollment captures averaged into one template. */
   enrollSamples: 3,
 } as const;

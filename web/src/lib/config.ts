@@ -50,10 +50,12 @@ export const LIVENESS = {
   blinkReopenRatio: 0.82,
   /** yaw delta (deg) to count a head turn. */
   headTurnDeltaDeg: 18,
+  /** pitch delta (deg) to count a nod. */
+  nodPitchDeltaDeg: 14,
   /** whole active challenge must complete within this window. */
-  timeoutMs: 5000,
+  timeoutMs: 9000,
   /** how many distinct challenges to require (randomized). */
-  challengeCount: 1,
+  challengeCount: 3,
 } as const;
 
 // ── Drowsiness / attention monitoring (eye-landmark based) ──

@@ -38,7 +38,8 @@ export const GATE_TEXT: Record<string, Pair> = {
 export const LIVENESS_TEXT: Record<string, Pair> = {
   blink: {hi: 'पलक झपकाएँ', en: 'Blink your eyes'},
   smile: {hi: 'मुस्कुराएँ', en: 'Smile'},
-  turn: {hi: 'सिर घुमाएँ', en: 'Turn your head'},
+  turn: {hi: 'सिर बाएँ-दाएँ घुमाएँ', en: 'Turn your head left or right'},
+  nod: {hi: 'सिर ऊपर-नीचे करें', en: 'Nod your head up and down'},
   passed: {hi: 'सत्यापित', en: 'Liveness confirmed'},
   failed: {hi: 'विफल, पुनः प्रयास करें', en: 'Liveness failed, retry'},
 };
