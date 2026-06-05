@@ -21,6 +21,8 @@ export const RECOGNITION = {
   matchDistance: 0.5,
   /** Captures averaged into one enrollment template. */
   enrollSamples: 5,
+  /** Keep browser-demo verification compute under the 1s target. */
+  verifyProbes: 1,
 } as const;
 
 // ── Quality gates (browser coordinates, normalized to video size) ──
@@ -40,14 +42,18 @@ export const LIVENESS = {
   /** face-api 'happy' expression probability for a smile. */
   smileProb: 0.7,
   /** Eye Aspect Ratio: below = closed, above = open (blink = closed->open). */
-  earClosed: 0.21,
-  earOpen: 0.28,
+  earClosed: 0.2,
+  earOpen: 0.25,
+  /** Also accept a relative EAR drop; browser landmarks vary by camera/face. */
+  blinkDrop: 0.045,
+  blinkClosedRatio: 0.78,
+  blinkReopenRatio: 0.9,
   /** yaw delta (deg) to count a head turn. */
   headTurnDeltaDeg: 18,
   /** whole active challenge must complete within this window. */
-  timeoutMs: 7000,
+  timeoutMs: 5000,
   /** how many distinct challenges to require (randomized). */
-  challengeCount: 2,
+  challengeCount: 1,
 } as const;
 
 // ── Drowsiness / attention monitoring (eye-landmark based) ──

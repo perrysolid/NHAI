@@ -215,12 +215,11 @@ export default function App() {
 
   const finishVerify = useCallback(
     async (video: HTMLVideoElement) => {
-      // Robustness: sample a few frames and keep the BEST (min-distance) match.
-      // This smooths out single-frame noise from glasses, motion and lighting,
-      // which matters for real-world / Indian-face captures. Still well under 1s.
+      // Keep the browser-demo auth compute path below the 1s target. Enrollment
+      // still averages multiple samples, so one live descriptor is enough here.
       const tRec0 = performance.now();
       const probes: Float32Array[] = [];
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < RECOGNITION.verifyProbes; i++) {
         const d = await computeDescriptor(video);
         if (d) {
           probes.push(d);

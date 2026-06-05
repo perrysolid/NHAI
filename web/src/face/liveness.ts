@@ -39,6 +39,8 @@ export class LivenessChallenge {
   private startedAt = 0;
   // per-challenge sub-state
   private blinkSawClosed = false;
+  private blinkOpenEar = 0;
+  private blinkMinEar = Number.POSITIVE_INFINITY;
   private turnBaselineYaw: number | null = null;
 
   constructor(rng: () => number = Math.random) {
@@ -58,6 +60,8 @@ export class LivenessChallenge {
 
   private resetSub(): void {
     this.blinkSawClosed = false;
+    this.blinkOpenEar = 0;
+    this.blinkMinEar = Number.POSITIVE_INFINITY;
     this.turnBaselineYaw = null;
   }
 
@@ -67,11 +71,30 @@ export class LivenessChallenge {
 
   private satisfied(s: FaceSignals): boolean {
     switch (this.current()) {
-      case 'blink':
-        if (s.ear < LIVENESS.earClosed) {
+      case 'blink': {
+        this.blinkOpenEar = Math.max(this.blinkOpenEar, s.ear);
+        this.blinkMinEar = Math.min(this.blinkMinEar, s.ear);
+
+        // Absolute EAR thresholds are brittle across browser webcams. Treat a
+        // sharp drop from the subject's own open-eye baseline as "closed" too.
+        const closedByAbsolute = s.ear <= LIVENESS.earClosed;
+        const closedByDrop =
+          this.blinkOpenEar > 0 &&
+          (this.blinkOpenEar - s.ear >= LIVENESS.blinkDrop ||
+            s.ear <= this.blinkOpenEar * LIVENESS.blinkClosedRatio);
+        if (closedByAbsolute || closedByDrop) {
           this.blinkSawClosed = true;
         }
-        return this.blinkSawClosed && s.ear > LIVENESS.earOpen;
+
+        const reopenedByAbsolute = s.ear >= LIVENESS.earOpen;
+        const reopenedByRecovery =
+          this.blinkSawClosed &&
+          this.blinkOpenEar > 0 &&
+          Number.isFinite(this.blinkMinEar) &&
+          s.ear - this.blinkMinEar >= LIVENESS.blinkDrop &&
+          s.ear >= this.blinkOpenEar * LIVENESS.blinkReopenRatio;
+        return this.blinkSawClosed && (reopenedByAbsolute || reopenedByRecovery);
+      }
       case 'smile':
         return s.happy >= LIVENESS.smileProb;
       case 'turn':
