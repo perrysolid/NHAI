@@ -8,6 +8,8 @@ import {RECOGNITION} from '../lib/config';
 export interface StatStripProps {
   detectMs: number;
   fps: number;
+  /** network requests made during the auth flow — proves offline operation. */
+  authCalls: number;
 }
 
 /** Browser model footprint actually served from /models (face-api). */
@@ -35,7 +37,7 @@ function Metric({
   );
 }
 
-export default function StatStrip({detectMs, fps}: StatStripProps) {
+export default function StatStrip({detectMs, fps, authCalls}: StatStripProps) {
   const latency = detectMs > 0 ? Math.round(detectMs).toString() : '—';
   const rate = fps > 0 ? fps.toFixed(0) : '—';
   return (
@@ -43,12 +45,21 @@ export default function StatStrip({detectMs, fps}: StatStripProps) {
       <Metric label="Execution" value="On-device" tone="signal" />
       <Metric label="Latency" value={latency} unit="ms" />
       <Metric label="Throughput" value={rate} unit="fps" />
-      <Metric label="Model footprint" value={MODEL_FOOTPRINT_MB.toFixed(1)} unit="MB" />
+      <Metric
+        label="Model footprint"
+        value={MODEL_FOOTPRINT_MB.toFixed(1)}
+        unit="MB"
+      />
       <Metric
         label="Match threshold"
         value={RECOGNITION.matchDistance.toFixed(2)}
       />
-      <Metric label="Pipeline" value="Detect · Live · Match" />
+      <Metric
+        label="Auth network"
+        value={authCalls.toString()}
+        unit="calls"
+        tone={authCalls === 0 ? 'signal' : 'warn'}
+      />
     </div>
   );
 }

@@ -42,6 +42,12 @@ export interface AttendanceRecord {
   matchDistance: number;
   deviceId: string;
   synced: boolean;
+  /** 0..1 confidence derived from match distance. */
+  confidence?: number;
+  /** composite Authentication Score 0..100 (weighted across all signals). */
+  score?: number;
+  /** on-device recognition-pipeline latency (ms): detect + embed + match. */
+  latencyMs?: number;
   inspection?: InspectionMetrics;
 }
 

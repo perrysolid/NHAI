@@ -50,6 +50,18 @@ export function averageDescriptors(list: Float32Array[]): Float32Array {
   return out;
 }
 
+/**
+ * Map a raw Euclidean distance to an intuitive 0..1 confidence via a logistic
+ * curve centred on the match threshold (boundary = 50%). Strong matches (~0.3)
+ * read ~90%+, impostors (~0.6) read low. Monotonic in distance, so it is an
+ * honest re-expression of the same decision.
+ */
+export function confidenceFromDistance(distance: number): number {
+  const steepness = 12;
+  const mid = RECOGNITION.matchDistance;
+  return 1 / (1 + Math.exp(steepness * (distance - mid)));
+}
+
 export interface MatchResult {
   distance: number;
   similarity: number;

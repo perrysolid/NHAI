@@ -66,6 +66,21 @@ export const DROWSINESS = {
   highBlinkRate: 28,
 } as const;
 
+// ── Composite authentication score — weighted aggregate of all signals ──
+// Weights must sum to 1. Tune to shift emphasis (e.g. raise liveness for
+// stricter anti-spoof). Overall score = sum(weight_i * subscore_i) * 100.
+export const SCORING = {
+  weights: {
+    recognition: 0.45, // is this the right person (match confidence)
+    liveness: 0.25, // is it a live human (challenge passed)
+    alertness: 0.1, // not drowsy / eyes open
+    pose: 0.1, // frontal head pose
+    illumination: 0.1, // adequate, even lighting
+  },
+  /** below this overall score (0..100) a match is treated as low-trust. */
+  reviewBelow: 70,
+} as const;
+
 // ── Sync target (Render backend). Override via VITE_SYNC_URL at build time. ──
 export const SYNC = {
   url:
@@ -75,5 +90,13 @@ export const SYNC = {
   apiKey: (import.meta.env?.VITE_SYNC_KEY as string | undefined) ?? 'CHANGE_ME',
 } as const;
 
-export const config = {FLAGS, RECOGNITION, GATES, LIVENESS, DROWSINESS, SYNC};
+export const config = {
+  FLAGS,
+  RECOGNITION,
+  GATES,
+  LIVENESS,
+  DROWSINESS,
+  SCORING,
+  SYNC,
+};
 export default config;

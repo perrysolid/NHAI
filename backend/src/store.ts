@@ -27,7 +27,18 @@ export interface AttendanceRecord {
   livenessPassed: boolean;
   matchDistance: number;
   deviceId: string;
+  confidence?: number;
+  score?: number;
+  latencyMs?: number;
   inspection?: InspectionMetrics;
+}
+
+function optNum(v: unknown): number | undefined {
+  if (v === undefined || v === null) {
+    return undefined;
+  }
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 export interface Store {
@@ -81,6 +92,9 @@ function sanitize(r: unknown): AttendanceRecord | null {
     deviceId: o.deviceId.slice(0, 128),
     livenessPassed: Boolean(o.livenessPassed),
     matchDistance: num(o.matchDistance),
+    confidence: optNum(o.confidence),
+    score: optNum(o.score),
+    latencyMs: optNum(o.latencyMs),
     inspection: sanitizeInspection(o.inspection),
   };
 }
@@ -145,23 +159,33 @@ class PostgresStore implements Store {
         device_id      TEXT   NOT NULL,
         liveness_passed BOOLEAN NOT NULL,
         match_distance REAL   NOT NULL,
+        confidence     REAL,
+        score          REAL,
+        latency_ms     INTEGER,
         metrics        JSONB,
         created_at     TIMESTAMPTZ DEFAULT now(),
         PRIMARY KEY (user_id, ts, device_id)
       );
     `);
-    // tolerate pre-existing tables without the metrics column
-    await this.pool.query(
-      `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS metrics JSONB;`,
-    );
+    // tolerate pre-existing tables without the newer columns
+    for (const col of [
+      'confidence REAL',
+      'score REAL',
+      'latency_ms INTEGER',
+      'metrics JSONB',
+    ]) {
+      await this.pool.query(
+        `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS ${col};`,
+      );
+    }
   }
 
   async add(records: AttendanceRecord[]): Promise<number> {
     let accepted = 0;
     for (const r of records) {
       const res = await this.pool.query(
-        `INSERT INTO attendance (user_id, ts, device_id, liveness_passed, match_distance, metrics)
-         VALUES ($1,$2,$3,$4,$5,$6)
+        `INSERT INTO attendance (user_id, ts, device_id, liveness_passed, match_distance, confidence, score, latency_ms, metrics)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
          ON CONFLICT (user_id, ts, device_id) DO NOTHING`,
         [
           r.userId,
@@ -169,6 +193,9 @@ class PostgresStore implements Store {
           r.deviceId,
           r.livenessPassed,
           r.matchDistance,
+          r.confidence ?? null,
+          r.score ?? null,
+          r.latencyMs ?? null,
           r.inspection ? JSON.stringify(r.inspection) : null,
         ],
       );
@@ -179,7 +206,7 @@ class PostgresStore implements Store {
 
   async list(limit: number, since = 0): Promise<AttendanceRecord[]> {
     const res = await this.pool.query(
-      `SELECT user_id, ts, device_id, liveness_passed, match_distance, metrics
+      `SELECT user_id, ts, device_id, liveness_passed, match_distance, confidence, score, latency_ms, metrics
          FROM attendance WHERE ts >= $1
         ORDER BY ts DESC LIMIT $2`,
       [since, limit],
@@ -190,6 +217,9 @@ class PostgresStore implements Store {
       deviceId: row.device_id,
       livenessPassed: row.liveness_passed,
       matchDistance: row.match_distance,
+      confidence: optNum(row.confidence),
+      score: optNum(row.score),
+      latencyMs: optNum(row.latency_ms),
       inspection: sanitizeInspection(row.metrics),
     }));
   }

@@ -102,6 +102,24 @@ function sparkbars(records: AttendanceRecord[]): string {
     <div class="spark__axis"><span>recent events</span><span>match distance (lower = stronger)</span></div>`;
 }
 
+function scoreBars(records: AttendanceRecord[]): string {
+  const recent = records.filter(r => typeof r.score === 'number').slice(0, 40).reverse();
+  if (recent.length === 0) {
+    return '<div class="dim">no scored events yet</div>';
+  }
+  const bars = recent
+    .map(r => {
+      const s = r.score ?? 0;
+      const tone = s >= 85 ? 'bar--ok' : s >= 70 ? 'bar--warn' : 'bar--bad';
+      return `<span class="bar ${tone}" style="height:${Math.max(4, s)}%" title="${esc(
+        r.userId,
+      )} · score ${s}"></span>`;
+    })
+    .join('');
+  return `<div class="spark">${bars}</div>
+    <div class="spark__axis"><span>recent events</span><span>authentication score (0-100, higher = stronger)</span></div>`;
+}
+
 export function renderDashboard(
   records: AttendanceRecord[],
   storeKind: string,
@@ -116,23 +134,39 @@ export function renderDashboard(
   const avgDist = total
     ? records.reduce((s, r) => s + r.matchDistance, 0) / total
     : 0;
+  const attacksBlocked = records.filter(r => !r.livenessPassed).length;
+  const scored = records.filter(r => typeof r.score === 'number');
+  const avgScore = scored.length
+    ? scored.reduce((s, r) => s + (r.score ?? 0), 0) / scored.length
+    : 0;
   const last = total ? new Date(records[0].timestamp).toLocaleString() : '—';
 
   const rows = records
     .map(r => {
       const f = flagsFor(r);
-      const rowTone = f.drowsy
-        ? 'row--bad'
-        : f.away || f.poorLight || f.weakMatch
-          ? 'row--warn'
-          : '';
+      const attack = !r.livenessPassed;
+      const rowTone =
+        attack || f.drowsy
+          ? 'row--bad'
+          : f.away || f.poorLight || f.weakMatch
+            ? 'row--warn'
+            : '';
+      const scoreTone =
+        typeof r.score !== 'number'
+          ? 'dim'
+          : r.score >= 85
+            ? ''
+            : r.score >= 70
+              ? 'warn'
+              : 'bad';
       return `<tr class="${rowTone}">
         <td class="mono">${esc(r.userId)}</td>
         <td class="mono dim">${new Date(r.timestamp).toLocaleString()}</td>
-        <td>${r.livenessPassed ? '<span class="chip chip--ok">pass</span>' : '<span class="chip chip--bad">fail</span>'}</td>
+        <td>${r.livenessPassed ? '<span class="chip chip--ok">pass</span>' : '<span class="chip chip--bad">blocked</span>'}</td>
+        <td class="mono ${scoreTone}">${typeof r.score === 'number' ? r.score : '—'}</td>
         <td class="mono">${r.matchDistance.toFixed(3)}</td>
         ${inspectionCells(r.inspection)}
-        <td>${flagChips(f)}</td>
+        <td>${attack ? '<span class="chip chip--bad">Attack blocked</span>' : flagChips(f)}</td>
         <td class="mono dim">${esc(r.deviceId)}</td>
       </tr>`;
     })
@@ -157,7 +191,8 @@ export function renderDashboard(
   .title{font-size:18px;font-weight:600}
   .sub{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.16em;color:var(--dim);margin-top:3px}
   .meta{font-family:var(--mono);font-size:11px;color:var(--dim);text-align:right;line-height:1.7}
-  .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:20px 0}
+  .kpis{display:grid;grid-template-columns:repeat(8,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:20px 0}
+  @media(max-width:1100px){.kpis{grid-template-columns:repeat(4,1fr)}}
   .kpi{background:var(--surface);padding:14px 16px}
   .kpi__label{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--faint);margin-bottom:8px}
   .kpi__value{font-family:var(--mono);font-size:20px;font-weight:500}
@@ -195,10 +230,17 @@ export function renderDashboard(
   <div class="kpis">
     ${kpiCard('Total events', String(total))}
     ${kpiCard('Subjects', String(subjects))}
+    ${kpiCard('Avg auth score', scored.length ? Math.round(avgScore).toString() : '—', avgScore >= 85 ? 'signal' : avgScore >= 70 ? 'warn' : 'bad')}
     ${kpiCard('Liveness pass', pct(livenessRate), livenessRate >= 0.99 ? 'signal' : 'warn')}
+    ${kpiCard('Attacks blocked', String(attacksBlocked), attacksBlocked > 0 ? 'bad' : 'signal')}
     ${kpiCard('Avg match dist', avgDist.toFixed(3))}
     ${kpiCard('Drowsy events', String(drowsy), drowsy > 0 ? 'bad' : 'signal')}
     ${kpiCard('Look-away events', String(away), away > 0 ? 'warn' : 'signal')}
+  </div>
+
+  <div class="card">
+    <div class="card__h">Authentication score — recent events</div>
+    <div class="card__b">${scoreBars(records)}</div>
   </div>
 
   <div class="card">
@@ -214,7 +256,7 @@ export function renderDashboard(
         ? '<div class="empty">No records yet. Verify a subject in the app and sync.</div>'
         : `<table>
       <thead><tr>
-        <th>Subject</th><th>Time</th><th>Liveness</th><th>Distance</th>
+        <th>Subject</th><th>Time</th><th>Liveness</th><th>Score</th><th>Distance</th>
         <th>EAR</th><th>PERCLOS</th><th>Blink</th><th>Yaw / Light</th>
         <th>Inspection</th><th>Device</th>
       </tr></thead>

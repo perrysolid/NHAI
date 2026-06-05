@@ -12,8 +12,14 @@ import './App.css';
 import {loadModels} from './face/loader';
 import {computeDescriptor} from './face/pipeline';
 import {LivenessChallenge, type LivenessSnapshot} from './face/liveness';
-import {averageDescriptors, matchDescriptor} from './lib/matching';
+import {
+  averageDescriptors,
+  matchDescriptor,
+  confidenceFromDistance,
+} from './lib/matching';
 import {RECOGNITION, FLAGS} from './lib/config';
+import {computeComposite, type ScoreComponent} from './lib/scoring';
+import {installNetMonitor, netMonitor} from './lib/netMonitor';
 import {
   enqueueRecord,
   getDeviceId,
@@ -25,21 +31,34 @@ import {
   type InspectionMetrics,
 } from './lib/storage';
 import {syncPending} from './lib/syncClient';
+import {speak, setSpeechEnabled, isSpeechSupported} from './lib/speech';
 import {useCamera} from './ui/useCamera';
 import {useFaceLoop} from './ui/useFaceLoop';
 import CameraStage from './ui/CameraStage';
 import StatStrip from './ui/StatStrip';
 import InspectionPanel from './ui/InspectionPanel';
+import ScoreBreakdown from './ui/ScoreBreakdown';
 
 type Mode = 'idle' | 'enrolling' | 'verifying';
 type ModelState = 'loading' | 'ready' | 'error';
+interface LatencyBudget {
+  recognizeMs: number;
+  matchMs: number;
+  totalMs: number;
+}
 interface Verdict {
   ok: boolean;
   label: string;
   detail?: string;
+  confidence?: number;
+  latency?: LatencyBudget;
+  score?: number;
+  components?: ScoreComponent[];
 }
 
 const CAPTURE_THROTTLE_MS = 350;
+
+installNetMonitor();
 
 export default function App() {
   const [modelState, setModelState] = useState<ModelState>('loading');
@@ -54,6 +73,9 @@ export default function App() {
   const [queue, setQueue] = useState<AttendanceRecord[]>(getQueue);
   const [mockSync, setMockSync] = useState<boolean>(FLAGS.MOCK_SYNC);
   const [online, setOnline] = useState<boolean>(navigator.onLine);
+  const [voice, setVoice] = useState<boolean>(isSpeechSupported());
+  const [authCalls, setAuthCalls] = useState(0);
+  const [spoofBlocked, setSpoofBlocked] = useState(0);
 
   const {videoRef, status: camStatus, start} = useCamera();
   const enabled = modelState === 'ready' && camStatus === 'ready';
@@ -73,6 +95,10 @@ export default function App() {
     setEnrollments(getEnrollments());
     setQueue(getQueue());
   }, []);
+
+  useEffect(() => {
+    setSpeechEnabled(voice);
+  }, [voice]);
 
   useEffect(() => {
     const on = () => setOnline(true);
@@ -116,6 +142,7 @@ export default function App() {
     enrollBufRef.current = [];
     setEnrollCount(0);
     setResult(null);
+    netMonitor.beginAuth();
     setMode('enrolling');
     addLog(`Enrolling "${id}"`);
   }, [userId, addLog]);
@@ -130,6 +157,7 @@ export default function App() {
     challenge.start(performance.now());
     livenessRef.current = challenge;
     setLiveness(challenge.snapshot(performance.now()));
+    netMonitor.beginAuth();
     setMode('verifying');
     addLog('Verification started · awaiting liveness challenge');
   }, [addLog]);
@@ -144,8 +172,11 @@ export default function App() {
         samples: enrollBufRef.current.length,
       });
       enrollBufRef.current = [];
+      netMonitor.endAuth();
+      setAuthCalls(netMonitor.authCalls);
       setMode('idle');
       setResult({ok: true, label: 'Enrolled', detail: id});
+      speak('Enrolled / पंजीकृत');
       addLog(`Enrolled "${id}" · ${RECOGNITION.enrollSamples} samples averaged`);
       refreshData();
     },
@@ -154,12 +185,17 @@ export default function App() {
 
   const finishVerify = useCallback(
     async (video: HTMLVideoElement) => {
+      const tRec0 = performance.now();
       const probe = await computeDescriptor(video);
+      const recognizeMs = performance.now() - tRec0;
       if (!probe) {
+        netMonitor.endAuth();
+        setAuthCalls(netMonitor.authCalls);
         setResult({ok: false, label: 'No face', detail: 'capture again'});
         setMode('idle');
         return;
       }
+      const tMatch0 = performance.now();
       let best: {id: string; distance: number} | null = null;
       for (const e of getEnrollments()) {
         const m = matchDescriptor(probe, Float32Array.from(e.descriptor));
@@ -167,6 +203,12 @@ export default function App() {
           best = {id: e.userId, distance: m.distance};
         }
       }
+      const matchMs = performance.now() - tMatch0;
+      const latency: LatencyBudget = {
+        recognizeMs: Math.round(recognizeMs),
+        matchMs: Math.round(matchMs),
+        totalMs: Math.round(recognizeMs + matchMs),
+      };
       const matched = best && best.distance < RECOGNITION.matchDistance;
       if (matched && best) {
         const fs = latest.current;
@@ -183,6 +225,17 @@ export default function App() {
           pitchDeg: round(prim?.pitchDeg ?? 0, 1),
           brightness: round(fs?.brightness ?? 0, 0),
         };
+        const confidence = confidenceFromDistance(best.distance);
+        const composite = computeComposite({
+          recognitionConfidence: confidence,
+          livenessPassed: true,
+          drowsy: inspection.drowsy,
+          lookingAway: inspection.lookingAway,
+          ear: inspection.ear,
+          yawDeg: inspection.yawDeg,
+          pitchDeg: inspection.pitchDeg,
+          brightness: inspection.brightness,
+        });
         const record: AttendanceRecord = {
           userId: best.id,
           timestamp: Date.now(),
@@ -190,27 +243,41 @@ export default function App() {
           matchDistance: Number(best.distance.toFixed(4)),
           deviceId: getDeviceId(),
           synced: false,
+          confidence: Number(confidence.toFixed(4)),
+          score: composite.overall,
+          latencyMs: latency.totalMs,
           inspection,
         };
         enqueueRecord(record);
         setResult({
           ok: true,
-          label: 'Match',
-          detail: `${best.id} · distance ${best.distance.toFixed(3)}`,
+          label: composite.lowTrust ? 'Match (low trust)' : 'Match',
+          detail: `${best.id} · ${(confidence * 100).toFixed(1)}% recognition`,
+          confidence,
+          latency,
+          score: composite.overall,
+          components: composite.components,
         });
+        speak('Verified / सत्यापित');
         addLog(
           `Match "${best.id}" · dist ${best.distance.toFixed(3)} · ${
             inspection.drowsy ? 'DROWSY' : 'alert'
           } · queued`,
         );
       } else {
+        const conf = best ? confidenceFromDistance(best.distance) : 0;
         setResult({
           ok: false,
           label: 'No match',
-          detail: best ? `closest ${best.distance.toFixed(3)}` : undefined,
+          detail: best ? `${(conf * 100).toFixed(1)}% confidence` : undefined,
+          confidence: conf,
+          latency,
         });
+        speak('No match / मेल नहीं');
         addLog('No matching enrollment');
       }
+      netMonitor.endAuth();
+      setAuthCalls(netMonitor.authCalls);
       setMode('idle');
       refreshData();
     },
@@ -263,6 +330,9 @@ export default function App() {
       const snap = challenge.update(fs.observation.primary, now);
       setLiveness(snap);
       setPrompt(snap.prompt);
+      if (snap.status === 'running') {
+        speak(snap.prompt);
+      }
       if (snap.status === 'passed' && !busyRef.current) {
         busyRef.current = true;
         try {
@@ -273,14 +343,53 @@ export default function App() {
           setLiveness(null);
         }
       } else if (snap.status === 'failed') {
+        // A failed live challenge = a rejected non-live presentation. Record it
+        // so the dashboard can report presentation attacks blocked.
+        const fsf = latest.current;
+        enqueueRecord({
+          userId: userId.trim() || 'unidentified',
+          timestamp: Date.now(),
+          livenessPassed: false,
+          matchDistance: 1,
+          deviceId: getDeviceId(),
+          synced: false,
+          inspection: fsf
+            ? {
+                ear: Number((fsf.attention.ear ?? 0).toFixed(3)),
+                perclos: Number((fsf.attention.perclos ?? 0).toFixed(3)),
+                blinkRate: Number((fsf.attention.blinkRate ?? 0).toFixed(1)),
+                drowsy: fsf.attention.drowsy,
+                lookingAway: fsf.attention.lookingAway,
+                yawDeg: Number((fsf.observation.primary?.yawDeg ?? 0).toFixed(1)),
+                pitchDeg: Number(
+                  (fsf.observation.primary?.pitchDeg ?? 0).toFixed(1),
+                ),
+                brightness: Math.round(fsf.brightness),
+              }
+            : undefined,
+        });
+        setSpoofBlocked(n => n + 1);
+        netMonitor.endAuth();
+        setAuthCalls(netMonitor.authCalls);
         setResult({ok: false, label: 'Liveness failed', detail: 'retry'});
-        addLog('Liveness challenge failed · spoof rejected');
+        speak('Liveness failed / विफल');
+        addLog('Liveness challenge failed · presentation attack blocked');
         setMode('idle');
         livenessRef.current = null;
         setLiveness(null);
+        refreshData();
       }
     }
-  }, [videoRef, latest, mode, userId, finishEnroll, finishVerify, addLog]);
+  }, [
+    videoRef,
+    latest,
+    mode,
+    userId,
+    finishEnroll,
+    finishVerify,
+    addLog,
+    refreshData,
+  ]);
 
   useEffect(() => {
     if (mode === 'idle') {
@@ -345,6 +454,15 @@ export default function App() {
           </div>
         </div>
         <div className="sysmeta">
+          {isSpeechSupported() && (
+            <button
+              className={`voicebtn ${voice ? 'voicebtn--on' : ''}`}
+              onClick={() => setVoice(v => !v)}
+              data-testid="voice"
+              title="Toggle voice prompts">
+              Voice {voice ? 'on' : 'off'}
+            </button>
+          )}
           <span className={`netchip ${online ? 'netchip--on' : 'netchip--off'}`}>
             <span className="netchip__dot" />
             Network {online ? 'online' : 'offline'}
@@ -362,7 +480,11 @@ export default function App() {
         </p>
       </div>
 
-      <StatStrip detectMs={metrics.detectMs} fps={metrics.fps} />
+      <StatStrip
+        detectMs={metrics.detectMs}
+        fps={metrics.fps}
+        authCalls={authCalls}
+      />
 
       <main className="layout">
         <section className="left">
@@ -379,9 +501,29 @@ export default function App() {
             <div
               className={`verdict ${result.ok ? 'verdict--ok' : 'verdict--bad'}`}
               data-testid="result">
-              <span className="verdict__tag">{result.label}</span>
-              {result.detail && (
-                <span className="verdict__detail">{result.detail}</span>
+              <div className="verdict__row">
+                <span className="verdict__tag">{result.label}</span>
+                {result.detail && (
+                  <span className="verdict__detail">{result.detail}</span>
+                )}
+              </div>
+              {result.latency && (
+                <div className="latency" data-testid="latency">
+                  <span className="latency__total">
+                    {result.latency.totalMs} ms
+                  </span>
+                  <span className="latency__break">
+                    recognize {result.latency.recognizeMs} ms · match{' '}
+                    {result.latency.matchMs} ms
+                  </span>
+                  <span className="latency__badge">&lt; 1 s on-device</span>
+                </div>
+              )}
+              {typeof result.score === 'number' && result.components && (
+                <ScoreBreakdown
+                  overall={result.score}
+                  components={result.components}
+                />
               )}
             </div>
           )}
@@ -412,6 +554,17 @@ export default function App() {
               data-testid="verify">
               Verify
             </button>
+          </div>
+
+          <div className="session">
+            <span className="session__label">
+              Presentation attacks blocked (session)
+            </span>
+            <span
+              className={`session__num ${spoofBlocked > 0 ? 'session__num--alert' : ''}`}
+              data-testid="spoof-count">
+              {spoofBlocked}
+            </span>
           </div>
         </section>
 
