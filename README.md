@@ -20,13 +20,11 @@
 
 [Package notes](docs/deliverables/README.md)
 
-**Optional browser demo:** [Try the demo](https://nhai-three.vercel.app)
-
 </div>
 
 ---
 
-> **Note on the demo.** The mandatory, spec-compliant solution is the **React Native app** in [`app/`](app) — it runs face detection, liveness and recognition fully offline on-device using bundled TFLite models. The hosted **web demo** ([`web/`](web)) mirrors the *same* pipeline in the browser so judges can try it from any device via a URL; it is a demonstration surface, not the scored model.
+> **Note for judges.** The mandatory, spec-compliant solution is the **React Native app** in [`app/`](app) — it runs face detection, liveness and recognition fully on-device using bundled TFLite models.
 
 ## The problem
 
@@ -98,7 +96,7 @@ Weights live in `config.ts` (`SCORING`) and are identical on native and web (`ap
 | 4 | Android 8.0+, no GPU, 3 GB RAM | `minSdk 26`, CPU TFLite delegate, ABI-split APKs | `android/` |
 | 5 | > 95% accuracy, Indian demographics, outdoor light | Compact ArcFace baseline + CLAHE/torch robustness; device + IndicFairFace validation documented | [`docs/NHAI_HACKATHON_ALIGNMENT.md`](docs/NHAI_HACKATHON_ALIGNMENT.md) |
 | 6 | Open-source only, source shared | All deps MIT / Apache-2.0; full source in repo | this repo |
-| D1 | Working cross-platform prototype | React Native app + browser demo | [`app/`](app), [`web/`](web) |
+| D1 | Working cross-platform prototype | React Native app | [`app/`](app) |
 | D1a | Offline liveness (blink/smile/turn) | Passive MiniFASNet + active challenge | `app/src/face/liveness.ts` |
 | D1b | Sync & purge after network returns | Queue → POST → purge on ack (AWS/Render) | `app/src/sync`, [`backend/`](backend) |
 | D2 | Documentation + benchmarks | Full `docs/` set incl. architecture & methodology | [`docs/`](docs) |
@@ -120,7 +118,7 @@ Weights live in `config.ts` (`SCORING`) and are identical on native and web (`ap
 | Path | Role | Stack |
 |------|------|-------|
 | [`app/`](app) | **Primary deliverable** — offline RN app (Android + iOS) | React Native 0.74, vision-camera, react-native-fast-tflite, ML Kit, MMKV |
-| [`web/`](web) | Browser **demo** of the same pipeline (Vercel) | Vite + React, @vladmandic/face-api, Web Speech API |
+| [`web/`](web) | Optional browser mirror retained for development comparison | Vite + React, @vladmandic/face-api, Web Speech API |
 | [`backend/`](backend) | Sync target + operations dashboard (AWS / Render) | Node + Express, optional Postgres |
 | [`docs/`](docs) | Plan, integration guide, methodology, deployment, alignment | — |
 
@@ -167,21 +165,15 @@ Models go in `app/assets/models/` (see its README for download + netron-verify s
 </details>
 
 <details>
-<summary><b>Web demo + sync backend</b></summary>
+<summary><b>Backend service (optional development only)</b></summary>
 
 ```bash
-# backend (terminal 1)
 cd backend && npm install && npm run build && npm start
-
-# web (terminal 2)
-cd web && npm install && npm run dev
 ```
-The web app works standalone in "simulate sync" mode (no backend needed) and uses your webcam.
 </details>
 
 ## Deploy
 
-- **Frontend → Vercel:** root dir `web`, framework Vite. Live: [nhai-three.vercel.app](https://nhai-three.vercel.app)
 - **Backend → Render:** one-click via [`render.yaml`](render.yaml); the public admin route is passcode-protected.
 - **Backend → AWS:** App Runner / Elastic Beanstalk / ECS / EC2 via [`backend/Dockerfile`](backend/Dockerfile) + [`backend/apprunner.yaml`](backend/apprunner.yaml). See [`docs/AWS_DEPLOYMENT.md`](docs/AWS_DEPLOYMENT.md).
 - Full steps: [`docs/WEB_RENDER_DEPLOYMENT.md`](docs/WEB_RENDER_DEPLOYMENT.md).
@@ -190,7 +182,7 @@ The web app works standalone in "simulate sync" mode (no backend needed) and use
 
 | Package | Type-check | Lint | Tests | Build |
 |---------|-----------|------|-------|-------|
-| `app/` (native) | clean | clean | 28 unit tests pass | Android release APK builds (69 MB universal / 50 MB arm64 / 40 MB armv7) |
+| `app/` (native) | clean | clean | 28 unit tests pass | Android release APK builds (70 MB universal / 51 MB arm64 / 41 MB armv7) |
 | `web/` | clean | clean | 4 Playwright E2E pass | Vite production build |
 | `backend/` | clean | — | endpoint smoke (sync/records/dedupe) | `tsc` build |
 

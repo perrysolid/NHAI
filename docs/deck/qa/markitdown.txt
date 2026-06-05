@@ -13,7 +13,8 @@ React Native / Android + iOS
 100% offline auth
 
 ~10.7 MB models
-Android APK  Download from README / docs/deliverables     Web demo  nhai-three.vercel.app
+Android APK  https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
+Judge flow: open APK -> choose Verify or Enroll -> local face template -> local verification
 
 ### Notes:
 
@@ -279,7 +280,7 @@ BUILT WITH OPEN-SOURCE
 Tech stack
 
 Native app (Android / iOS)
-Browser demo (Vercel)
+Judge package
 Sync backend (AWS / Render)
 React Native 0.74
 react-native-vision-camera
@@ -287,10 +288,10 @@ react-native-fast-tflite
 ML Kit face detection
 MMKV (encrypted store)
 react-native-tts (offline voice)
-Vite + React + TypeScript
-@vladmandic/face-api
-Web Speech API (offline TTS)
-Playwright E2E
+Universal Android APK
+ABI split APKs
+Bundled TFLite models
+Generated app logo asset
 Node + Express
 PostgreSQL (optional) / in-memory
 Docker + App Runner config
@@ -304,22 +305,22 @@ NHAI DATALAKE 3.0
 
 <!-- Slide number: 13 -->
 TRY IT NOW
-Android APK first, web demo optional
+Android APK for judge install
 
 ANDROID APK
 Primary judge install. Fully offline native authentication with bundled models.
 
 ![/Users/parth/nhai/docs/deck/assets/qr-github.png](Image0.jpg)
-Download universal APK
+https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
 
-BROWSER DEMO
-Open on a phone or laptop, allow the camera, enroll and verify.
+PACKAGE NOTES
+Install command, APK hashes, Android target and iOS packaging notes.
 
-![/Users/parth/nhai/docs/deck/assets/qr-demo.png](Image1.jpg)
-nhai-three.vercel.app
+![/Users/parth/nhai/docs/deck/assets/qr-github.png](Image1.jpg)
+docs/deliverables/README.md
 
 SOURCE CODE
-Native app, web demo and backend, with full documentation.
+Native app, backend and full documentation.
 
 ![/Users/parth/nhai/docs/deck/assets/qr-github.png](Image2.jpg)
 github.com/perrysolid/NHAI
@@ -364,6 +365,6 @@ Fine-tune on IndicFairFace for diverse Indian-demographic robustness
 On-device benchmarking across mid-range hardware to certify > 95% and < 1s
 Drop the FaceEngine into the existing Datalake 3.0 React Native screens
 Thank you
-nhai-three.vercel.app   ·   github.com/perrysolid/NHAI
+github.com/perrysolid/NHAI
 
 ### Notes:

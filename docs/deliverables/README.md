@@ -2,7 +2,8 @@
 
 This folder contains the installable Android build for hackathon judges plus the iOS packaging notes.
 
-[Download Android APK](https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk)
+Direct APK:
+https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
 
 ## Android APKs
 
@@ -14,7 +15,9 @@ adb install -r docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
 
 | File | Target device | Size | SHA-256 |
 |------|---------------|------|---------|
-| `DatalakeFaceAuth-android-universal-release.apk` | One APK for Android judge phones: arm64-v8a + armeabi-v7a | 69 MB | `acc6ede77a8c017b4e99d114d06db4a957df7510507bd9966784502fb2def79f` |
+| `DatalakeFaceAuth-android-universal-release.apk` | One APK for Android judge phones: arm64-v8a + armeabi-v7a | 70 MB | `1f82e318e012b364ec669972b7c8857dfe8b66a6276081bc7f8c27c6b9230f58` |
+| `DatalakeFaceAuth-android-arm64-v8a-release.apk` | Modern 64-bit Android phones | 51 MB | `be6b083cc6904524eed6eebccaa705199e4845b698f8161e3527740fcdb821b9` |
+| `DatalakeFaceAuth-android-armeabi-v7a-release.apk` | Older 32-bit Android phones | 41 MB | `b630351414de64bb21ae4181fe2e583600e7d67c577e814cc9697503b57c51a4` |
 
 Package details:
 

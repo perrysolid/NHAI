@@ -293,13 +293,7 @@ function scannerPhone(s, x, y, w, h) {
     ],
     {x: 0.95, y: 6.15, w: 11.9, h: 0.28, margin: 0},
   );
-  s.addText(
-    [
-      {text: 'Web demo  ', options: {color: C.faint, fontFace: HEAD, fontSize: 10.5}},
-      {text: 'nhai-three.vercel.app', options: {color: C.green, fontFace: HEAD, fontSize: 10.5, hyperlink: {url: 'https://nhai-three.vercel.app'}}},
-    ],
-    {x: 0.95, y: 6.55, w: 7, h: 0.32, margin: 0},
-  );
+  s.addText('Judge flow: open APK -> choose Verify or Enroll -> local face template -> local verification', {x: 0.95, y: 6.55, w: 10.8, h: 0.32, fontFace: HEAD, fontSize: 10.5, color: C.dim, margin: 0});
 })();
 
 // ───────────────────────── 2. PROBLEM ─────────────────────────
@@ -619,7 +613,7 @@ function scannerPhone(s, x, y, w, h) {
   title(s, 'Tech stack', 0.6, 0.95, 12);
   const cols = [
     ['Native app (Android / iOS)', ['React Native 0.74', 'react-native-vision-camera', 'react-native-fast-tflite', 'ML Kit face detection', 'MMKV (encrypted store)', 'react-native-tts (offline voice)']],
-    ['Browser demo (Vercel)', ['Vite + React + TypeScript', '@vladmandic/face-api', 'Web Speech API (offline TTS)', 'Playwright E2E']],
+    ['Judge package', ['Universal Android APK', 'ABI split APKs', 'Bundled TFLite models', 'Generated app logo asset']],
     ['Sync backend (AWS / Render)', ['Node + Express', 'PostgreSQL (optional) / in-memory', 'Docker + App Runner config', 'Server-rendered dashboard']],
   ];
   let x = 0.6;
@@ -638,11 +632,11 @@ function scannerPhone(s, x, y, w, h) {
 (() => {
   const s = slide();
   eyebrow(s, 'Try it now', 0.6, 0.55);
-  title(s, 'Android APK first, web demo optional', 0.6, 0.95, 12);
+  title(s, 'Android APK for judge install', 0.6, 0.95, 12);
   const links = [
     ['ANDROID APK', APK_URL, APK_URL, 'Primary judge install. Fully offline native authentication with bundled models.', 'qr-github.png'],
-    ['BROWSER DEMO', 'nhai-three.vercel.app', 'https://nhai-three.vercel.app', 'Open on a phone or laptop, allow the camera, enroll and verify.', 'qr-demo.png'],
-    ['SOURCE CODE', 'github.com/perrysolid/NHAI', 'https://github.com/perrysolid/NHAI', 'Native app, web demo and backend, with full documentation.', 'qr-github.png'],
+    ['PACKAGE NOTES', 'docs/deliverables/README.md', 'https://github.com/perrysolid/NHAI/blob/main/docs/deliverables/README.md', 'Install command, APK hashes, Android target and iOS packaging notes.', 'qr-github.png'],
+    ['SOURCE CODE', 'github.com/perrysolid/NHAI', 'https://github.com/perrysolid/NHAI', 'Native app, backend and full documentation.', 'qr-github.png'],
   ];
   let y = 2.2;
   for (const [k, label, url, desc, qr] of links) {
@@ -741,7 +735,7 @@ function scannerPhone(s, x, y, w, h) {
     15,
   );
   s.addText('Thank you', {x: 0.9, y: 5.55, w: 6, h: 0.7, fontFace: HEAD, fontSize: 24, color: C.green, bold: true, margin: 0});
-  s.addText('nhai-three.vercel.app   ·   github.com/perrysolid/NHAI', {x: 0.95, y: 6.25, w: 11, h: 0.4, fontFace: HEAD, fontSize: 12, color: C.dim, margin: 0});
+  s.addText('github.com/perrysolid/NHAI', {x: 0.95, y: 6.25, w: 11, h: 0.4, fontFace: HEAD, fontSize: 12, color: C.dim, margin: 0});
 })();
 
 pres.writeFile({fileName: 'Datalake_Face_Auth_Deck.pptx'}).then((f) => {

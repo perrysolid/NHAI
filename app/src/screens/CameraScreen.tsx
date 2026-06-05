@@ -8,8 +8,8 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
+  Image,
   Linking,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -42,7 +42,6 @@ import {meanLuma} from '../camera/frameUtils';
 import type {Face, FaceBounds, GateResult} from '../camera/types';
 import {OfflineAuthStore} from '../auth/offlineStore';
 import {createEncryptedAuthStore} from '../auth/mmkvStore';
-import {syncPending} from '../sync/syncClient';
 import {pick, GATE_TEXT, getLang, setLang, type Lang} from '../i18n';
 import {speak, setSpeechEnabled} from '../speech/tts';
 import {
@@ -54,8 +53,11 @@ import {TfliteFaceEngine, preprocessRgb, type FaceEngine} from '../face/engine';
 import {computeComposite, confidenceFromCosine} from '../face/scoring';
 import GuidanceOverlay from './GuidanceOverlay';
 
-type Mode = 'enroll' | 'verify' | 'records';
+type Page = 'home' | 'enroll_id' | 'camera';
+type Mode = 'enroll' | 'verify';
 type EngineState = 'loading' | 'ready' | 'error';
+
+const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
 interface LatestTensors {
   recognition: Uint8Array;
@@ -102,8 +104,8 @@ function expandedSquare(
   };
 }
 
-function formatTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString('en-IN', {hour12: false});
+function createInspectorId(): string {
+  return `inspector_${Date.now().toString(36).slice(-6)}`;
 }
 
 export default function CameraScreen(): React.JSX.Element {
@@ -112,8 +114,9 @@ export default function CameraScreen(): React.JSX.Element {
   const [gate, setGate] = useState<GateResult>(INITIAL_GATE);
   const [voice, setVoice] = useState(true);
   const [lang, setLangState] = useState<Lang>(getLang());
+  const [page, setPage] = useState<Page>('home');
   const [mode, setMode] = useState<Mode>('enroll');
-  const [userId, setUserId] = useState('inspector_01');
+  const [userId, setUserId] = useState('');
   const [engineState, setEngineState] = useState<EngineState>('loading');
   const [engineError, setEngineError] = useState('');
   const [samples, setSamples] = useState(0);
@@ -145,10 +148,10 @@ export default function CameraScreen(): React.JSX.Element {
   }, [voice]);
 
   useEffect(() => {
-    if (voice && gate.guidance) {
+    if (page === 'camera' && voice && gate.guidance) {
       speak(gate.guidance);
     }
-  }, [voice, gate.guidance]);
+  }, [page, voice, gate.guidance]);
 
   useEffect(() => {
     let cancelled = false;
@@ -173,12 +176,6 @@ export default function CameraScreen(): React.JSX.Element {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (!hasPermission) {
-      requestPermission();
-    }
-  }, [hasPermission, requestPermission]);
 
   const toggleLang = useCallback(() => {
     const next: Lang = lang === 'hi' ? 'en' : 'hi';
@@ -282,6 +279,52 @@ export default function CameraScreen(): React.JSX.Element {
     });
   }, [requestPermission]);
 
+  const openEnrollSetup = useCallback(() => {
+    setMode('enroll');
+    setPage('enroll_id');
+    setVerdict(null);
+    setSamples(0);
+    enrollSamplesRef.current = [];
+  }, []);
+
+  const openEnrollCamera = useCallback(() => {
+    const id = userId.trim();
+    if (!id) {
+      setVerdict({
+        ok: false,
+        title: 'Inspector ID required',
+        detail: 'Enter an ID or generate one on this phone.',
+      });
+      return;
+    }
+    setMode('enroll');
+    setPage('camera');
+    setVerdict(null);
+  }, [userId]);
+
+  const openVerifyCamera = useCallback(() => {
+    if (store.listEnrollments().length === 0) {
+      setVerdict({
+        ok: false,
+        title: 'Enroll first',
+        detail: 'Create a local face template before verification.',
+      });
+      setMode('enroll');
+      setPage('enroll_id');
+      return;
+    }
+    setMode('verify');
+    setPage('camera');
+    setLiveness(null);
+    setVerdict(null);
+  }, [store]);
+
+  const goHome = useCallback(() => {
+    challengeRef.current = null;
+    setLiveness(null);
+    setPage('home');
+  }, []);
+
   const captureEmbedding = useCallback(async (): Promise<Float32Array> => {
     const engine = engineRef.current;
     const tensors = latestTensorsRef.current;
@@ -312,10 +355,12 @@ export default function CameraScreen(): React.JSX.Element {
         enrollSamplesRef.current = [];
         setSamples(0);
         refreshCounts();
+        setMode('verify');
+        setLiveness(null);
         setVerdict({
           ok: true,
           title: 'Enrollment saved offline',
-          detail: `${id} · ${THRESHOLDS.enrollSamples} samples averaged`,
+          detail: `${id} is ready for verification`,
         });
       } else {
         setVerdict({
@@ -348,7 +393,6 @@ export default function CameraScreen(): React.JSX.Element {
     challengeRef.current = challenge;
     setLiveness(challenge.start(Date.now()));
     setVerdict(null);
-    setMode('verify');
   }, [store]);
 
   const runVerify = useCallback(async () => {
@@ -474,25 +518,6 @@ export default function CameraScreen(): React.JSX.Element {
     return () => clearInterval(id);
   }, [liveness, mode, refreshCounts, runVerify, store, userId, voice]);
 
-  const onSync = useCallback(async () => {
-    setBusy(true);
-    try {
-      const out = await syncPending(store);
-      refreshCounts();
-      setVerdict({
-        ok: out.ok,
-        title: out.ok ? 'Sync complete' : 'Sync failed',
-        detail: out.ok
-          ? `${out.purged} queued record(s) purged locally${
-              out.mocked ? ' · simulated backend' : ''
-            }`
-          : out.error ?? 'Network unavailable',
-      });
-    } finally {
-      setBusy(false);
-    }
-  }, [refreshCounts, store]);
-
   const onClearLocal = useCallback(() => {
     store.clearAll();
     enrollSamplesRef.current = [];
@@ -505,15 +530,48 @@ export default function CameraScreen(): React.JSX.Element {
     });
   }, [refreshCounts, store]);
 
+  if (page === 'home') {
+    return (
+      <HomePage
+        enrolled={enrolled}
+        pending={pending}
+        verdict={verdict}
+        onEnroll={openEnrollSetup}
+        onVerify={openVerifyCamera}
+        onReset={onClearLocal}
+      />
+    );
+  }
+
+  if (page === 'enroll_id') {
+    return (
+      <EnrollIdPage
+        userId={userId}
+        verdict={verdict}
+        onChangeUserId={setUserId}
+        onGenerate={() => {
+          setUserId(createInspectorId());
+          setVerdict(null);
+        }}
+        onContinue={openEnrollCamera}
+        onBack={goHome}
+      />
+    );
+  }
+
   if (!hasPermission) {
     return (
       <Centered>
+        <Image source={LOGO} style={styles.permissionLogo} />
         <Text style={styles.title}>Camera permission needed</Text>
         <Text style={styles.subtitle}>
-          Identity is verified fully on-device. Images never leave the phone.
+          Camera access is required for local enrollment and verification.
         </Text>
         <TouchableOpacity style={styles.primaryButton} onPress={onRequest}>
           <Text style={styles.primaryButtonText}>Allow camera</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.secondaryButton} onPress={goHome}>
+          <Text style={styles.secondaryButtonText}>Back</Text>
         </TouchableOpacity>
       </Centered>
     );
@@ -528,8 +586,6 @@ export default function CameraScreen(): React.JSX.Element {
     );
   }
 
-  const queue = store.getPendingQueue();
-
   return (
     <View style={styles.container}>
       <View style={styles.cameraPane}>
@@ -541,6 +597,9 @@ export default function CameraScreen(): React.JSX.Element {
         />
         <GuidanceOverlay gate={gate} />
         <View style={styles.cameraTop}>
+          <TouchableOpacity style={styles.backPill} onPress={goHome}>
+            <Text style={styles.backPillText}>BACK</Text>
+          </TouchableOpacity>
           <StatusPill
             label={
               engineState === 'ready'
@@ -551,7 +610,6 @@ export default function CameraScreen(): React.JSX.Element {
             }
             tone={engineState === 'ready' ? 'good' : 'warn'}
           />
-          <StatusPill label="AUTH NETWORK 0" tone="good" />
         </View>
         <View style={styles.cameraBottom}>
           <Text style={styles.guidanceText}>
@@ -569,7 +627,9 @@ export default function CameraScreen(): React.JSX.Element {
         <View style={styles.headerRow}>
           <View>
             <Text style={styles.kicker}>DATALAKE 3.0 FIELD AUTH</Text>
-            <Text style={styles.panelTitle}>Offline Face Auth</Text>
+            <Text style={styles.panelTitle}>
+              {mode === 'enroll' ? 'Enroll Face' : 'Verify Face'}
+            </Text>
           </View>
           <View style={styles.toggleRow}>
             <TouchableOpacity style={styles.smallToggle} onPress={toggleLang}>
@@ -587,23 +647,9 @@ export default function CameraScreen(): React.JSX.Element {
           </View>
         </View>
 
-        <View style={styles.tabs}>
-          {(['enroll', 'verify', 'records'] as Mode[]).map(item => (
-            <TouchableOpacity
-              key={item}
-              style={[styles.tab, mode === item && styles.tabActive]}
-              onPress={() => setMode(item)}>
-              <Text
-                style={[styles.tabText, mode === item && styles.tabTextActive]}>
-                {item.toUpperCase()}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
         <View style={styles.statsRow}>
-          <Metric label="Enrolled" value={String(enrolled)} />
-          <Metric label="Queue" value={String(pending)} />
+          <Metric label="Templates" value={String(enrolled)} />
+          <Metric label="Local records" value={String(pending)} />
           <Metric
             label="Model"
             value={
@@ -622,18 +668,11 @@ export default function CameraScreen(): React.JSX.Element {
 
         {mode === 'enroll' && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Enroll inspector offline</Text>
-            <TextInput
-              value={userId}
-              onChangeText={setUserId}
-              placeholder="Inspector ID"
-              placeholderTextColor="#6b7780"
-              autoCapitalize="none"
-              style={styles.input}
-            />
+            <Text style={styles.cardTitle}>Capture local face template</Text>
+            <Text style={styles.idLine}>{userId.trim()}</Text>
             <Text style={styles.helperText}>
-              Capture {THRESHOLDS.enrollSamples} steady face samples. Only the
-              embedding is stored in encrypted MMKV.
+              Capture {THRESHOLDS.enrollSamples} steady samples. The face
+              template is stored on this phone for verification.
             </Text>
             <TouchableOpacity
               disabled={busy || engineState !== 'ready'}
@@ -646,15 +685,22 @@ export default function CameraScreen(): React.JSX.Element {
                 Capture sample {samples + 1}/{THRESHOLDS.enrollSamples}
               </Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={openEnrollSetup}>
+              <Text style={styles.secondaryButtonText}>
+                Change inspector ID
+              </Text>
+            </TouchableOpacity>
           </View>
         )}
 
         {mode === 'verify' && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Verify attendance offline</Text>
+            <Text style={styles.cardTitle}>Run local verification</Text>
             <Text style={styles.helperText}>
               The phone runs active liveness, MiniFASNet passive anti-spoof and
-              MobileFaceNet matching locally before queueing attendance.
+              MobileFaceNet matching on-device.
             </Text>
             <TouchableOpacity
               disabled={busy || engineState !== 'ready'}
@@ -667,42 +713,12 @@ export default function CameraScreen(): React.JSX.Element {
                 {busy ? 'Verifying...' : 'Start liveness + verify'}
               </Text>
             </TouchableOpacity>
-          </View>
-        )}
-
-        {mode === 'records' && (
-          <View style={styles.card}>
-            <View style={styles.cardHeaderRow}>
-              <Text style={styles.cardTitle}>Offline queue</Text>
-              <TouchableOpacity onPress={onSync} style={styles.linkButton}>
-                <Text style={styles.linkButtonText}>Sync + purge</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.queueList}>
-              {queue.length === 0 ? (
-                <Text style={styles.helperText}>
-                  Queue empty. Verified records purge after sync
-                  acknowledgement.
-                </Text>
-              ) : (
-                queue.map(record => (
-                  <View
-                    key={`${record.userId}-${record.timestamp}`}
-                    style={styles.queueItem}>
-                    <Text style={styles.queueUser}>{record.userId}</Text>
-                    <Text style={styles.queueMeta}>
-                      {formatTime(record.timestamp)} · live{' '}
-                      {(record.livenessScore * 100).toFixed(0)}% · match{' '}
-                      {(record.matchScore * 100).toFixed(0)}%
-                    </Text>
-                  </View>
-                ))
-              )}
-            </ScrollView>
             <TouchableOpacity
-              onPress={onClearLocal}
-              style={styles.dangerButton}>
-              <Text style={styles.dangerButtonText}>Reset local demo data</Text>
+              style={styles.secondaryButton}
+              onPress={openEnrollSetup}>
+              <Text style={styles.secondaryButtonText}>
+                Enroll another inspector
+              </Text>
             </TouchableOpacity>
           </View>
         )}
@@ -719,6 +735,119 @@ export default function CameraScreen(): React.JSX.Element {
           </View>
         )}
       </View>
+    </View>
+  );
+}
+
+function HomePage({
+  enrolled,
+  pending,
+  verdict,
+  onEnroll,
+  onVerify,
+  onReset,
+}: {
+  enrolled: number;
+  pending: number;
+  verdict: Verdict | null;
+  onEnroll: () => void;
+  onVerify: () => void;
+  onReset: () => void;
+}): React.JSX.Element {
+  return (
+    <View style={[styles.container, styles.home]}>
+      <Image source={LOGO} style={styles.homeLogo} />
+      <Text style={styles.kicker}>DATALAKE 3.0 FIELD AUTH</Text>
+      <Text style={styles.homeTitle}>Face Auth</Text>
+      <Text style={styles.homeSubtitle}>
+        Choose a local action. Enroll creates the face template on this phone;
+        verify checks against saved templates.
+      </Text>
+
+      <View style={styles.homeActions}>
+        <TouchableOpacity style={styles.primaryButton} onPress={onVerify}>
+          <Text style={styles.primaryButtonText}>Verify</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.secondaryButton} onPress={onEnroll}>
+          <Text style={styles.secondaryButtonText}>Enroll</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.homeStats}>
+        <Metric label="Templates" value={String(enrolled)} />
+        <Metric label="Local records" value={String(pending)} />
+      </View>
+
+      {verdict && (
+        <View style={[styles.verdict, verdict.ok && styles.verdictOk]}>
+          <Text style={styles.verdictTitle}>{verdict.title}</Text>
+          <Text style={styles.verdictDetail}>{verdict.detail}</Text>
+        </View>
+      )}
+
+      {(enrolled > 0 || pending > 0) && (
+        <TouchableOpacity onPress={onReset} style={styles.dangerButton}>
+          <Text style={styles.dangerButtonText}>Reset local demo data</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+function EnrollIdPage({
+  userId,
+  verdict,
+  onChangeUserId,
+  onGenerate,
+  onContinue,
+  onBack,
+}: {
+  userId: string;
+  verdict: Verdict | null;
+  onChangeUserId: (id: string) => void;
+  onGenerate: () => void;
+  onContinue: () => void;
+  onBack: () => void;
+}): React.JSX.Element {
+  return (
+    <View style={[styles.container, styles.setupPage]}>
+      <TouchableOpacity style={styles.backPill} onPress={onBack}>
+        <Text style={styles.backPillText}>BACK</Text>
+      </TouchableOpacity>
+      <Image source={LOGO} style={styles.setupLogo} />
+      <Text style={styles.kicker}>ENROLLMENT</Text>
+      <Text style={styles.homeTitle}>Inspector ID</Text>
+      <Text style={styles.homeSubtitle}>
+        Enter an ID from the field register, or generate one locally before face
+        capture.
+      </Text>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>ID for this enrollment</Text>
+        <TextInput
+          value={userId}
+          onChangeText={onChangeUserId}
+          placeholder="Inspector ID"
+          placeholderTextColor="#6b7780"
+          autoCapitalize="none"
+          style={styles.input}
+        />
+        <View style={styles.setupButtons}>
+          <TouchableOpacity style={styles.secondaryButton} onPress={onGenerate}>
+            <Text style={styles.secondaryButtonText}>Generate ID</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.primaryButton} onPress={onContinue}>
+            <Text style={styles.primaryButtonText}>Continue to camera</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {verdict && (
+        <View style={[styles.verdict, verdict.ok && styles.verdictOk]}>
+          <Text style={styles.verdictTitle}>{verdict.title}</Text>
+          <Text style={styles.verdictDetail}>{verdict.detail}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -759,6 +888,50 @@ function Metric({
 const styles = StyleSheet.create({
   container: {flex: 1, backgroundColor: '#07090b'},
   centered: {alignItems: 'center', justifyContent: 'center', padding: 24},
+  home: {
+    justifyContent: 'center',
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+  },
+  setupPage: {
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+  },
+  homeLogo: {
+    width: 168,
+    height: 168,
+    alignSelf: 'center',
+    marginBottom: 22,
+    borderRadius: 28,
+  },
+  setupLogo: {
+    width: 116,
+    height: 116,
+    alignSelf: 'center',
+    marginTop: 36,
+    marginBottom: 22,
+    borderRadius: 22,
+  },
+  permissionLogo: {
+    width: 132,
+    height: 132,
+    borderRadius: 24,
+    marginBottom: 22,
+  },
+  homeTitle: {
+    color: '#dbe4e8',
+    fontSize: 34,
+    fontWeight: '900',
+    marginTop: 6,
+  },
+  homeSubtitle: {
+    color: '#8b97a5',
+    fontSize: 15,
+    lineHeight: 22,
+    marginTop: 10,
+  },
+  homeActions: {marginTop: 22, gap: 10},
+  homeStats: {flexDirection: 'row', gap: 8, marginTop: 16},
   cameraPane: {flex: 1.05, minHeight: 300, backgroundColor: '#000'},
   panel: {
     flex: 1,
@@ -784,6 +957,7 @@ const styles = StyleSheet.create({
     right: 14,
     flexDirection: 'row',
     justifyContent: 'space-between',
+    gap: 8,
   },
   cameraBottom: {
     position: 'absolute',
@@ -814,6 +988,15 @@ const styles = StyleSheet.create({
     borderColor: '#38e0a5',
   },
   statusText: {color: '#dbe4e8', fontSize: 10, fontWeight: '800'},
+  backPill: {
+    borderColor: '#25323b',
+    borderWidth: 1,
+    backgroundColor: 'rgba(7,9,11,0.76)',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    alignSelf: 'flex-start',
+  },
+  backPillText: {color: '#dbe4e8', fontSize: 11, fontWeight: '900'},
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -836,17 +1019,6 @@ const styles = StyleSheet.create({
   },
   toggleOn: {borderColor: '#38e0a5'},
   smallToggleText: {color: '#dbe4e8', fontSize: 12, fontWeight: '700'},
-  tabs: {flexDirection: 'row', gap: 8, marginTop: 14},
-  tab: {
-    flex: 1,
-    borderColor: '#25323b',
-    borderWidth: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  tabActive: {backgroundColor: '#111a21', borderColor: '#38e0a5'},
-  tabText: {color: '#8b97a5', fontSize: 12, fontWeight: '800'},
-  tabTextActive: {color: '#38e0a5'},
   statsRow: {flexDirection: 'row', gap: 8, marginTop: 12},
   metric: {
     flex: 1,
@@ -871,6 +1043,12 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   cardTitle: {color: '#dbe4e8', fontSize: 16, fontWeight: '900'},
+  idLine: {
+    color: '#38e0a5',
+    fontSize: 15,
+    fontWeight: '900',
+    marginTop: 8,
+  },
   input: {
     marginTop: 12,
     borderColor: '#25323b',
@@ -890,8 +1068,16 @@ const styles = StyleSheet.create({
   },
   disabledButton: {opacity: 0.45},
   primaryButtonText: {color: '#07100d', fontWeight: '900', fontSize: 14},
-  linkButton: {paddingHorizontal: 8, paddingVertical: 6},
-  linkButtonText: {color: '#38e0a5', fontWeight: '800', fontSize: 12},
+  secondaryButton: {
+    marginTop: 10,
+    borderColor: '#38e0a5',
+    borderWidth: 1,
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  secondaryButtonText: {color: '#38e0a5', fontWeight: '900', fontSize: 14},
+  setupButtons: {marginTop: 4},
   dangerButton: {
     marginTop: 10,
     borderColor: '#ff6b6b',
@@ -900,14 +1086,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   dangerButtonText: {color: '#ff6b6b', fontWeight: '800'},
-  queueList: {maxHeight: 145, marginTop: 8},
-  queueItem: {
-    borderTopColor: '#25323b',
-    borderTopWidth: 1,
-    paddingVertical: 8,
-  },
-  queueUser: {color: '#dbe4e8', fontSize: 14, fontWeight: '800'},
-  queueMeta: {color: '#8b97a5', fontSize: 12, marginTop: 3},
   verdict: {
     marginTop: 12,
     borderColor: '#ff6b6b',

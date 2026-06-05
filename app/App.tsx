@@ -1,8 +1,8 @@
 /**
  * DatalakeFaceAuth — offline on-device face recognition + liveness.
  *
- * Judge demo: camera gates, bundled TFLite model loading, offline enrollment,
- * dual liveness, local verification, encrypted queue, and sync→purge lifecycle.
+ * Judge demo: camera gates, bundled TFLite model loading, local enrollment,
+ * dual liveness, local verification, and local attendance records.
  * The auth decision stays 100% offline.
  *
  * @format
