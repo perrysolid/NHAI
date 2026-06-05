@@ -16,6 +16,7 @@
     "react-native-fast-tflite": "^1.3.0",
     "react-native-mmkv": "^2.12.2",
     "react-native-reanimated": "3.12.1",
+    "react-native-tts": "^4.1.1",
     "react-native-vision-camera": "4.5.0",
     "react-native-vision-camera-face-detector": "1.7.1",
     "react-native-worklets-core": "1.3.3",

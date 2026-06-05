@@ -1,4 +1,5 @@
 import {THRESHOLDS} from '../config';
+import {LIVENESS_TEXT, pick} from '../i18n';
 import type {Face} from '../camera/types';
 
 export type ActiveChallengeKind = 'blink' | 'smile' | 'turn';
@@ -12,13 +13,6 @@ export interface LivenessSnapshot {
   progress: number;
   msLeft: number;
 }
-
-// Short bilingual prompts (English / हिन्दी). Static, offline-safe.
-const GUIDANCE: Record<ActiveChallengeKind, string> = {
-  blink: 'Blink / पलक झपकाएँ',
-  smile: 'Smile / मुस्कुराएँ',
-  turn: 'Turn your head / सिर घुमाएँ',
-};
 
 function shuffle<T>(items: T[], rng: () => number): T[] {
   const out = [...items];
@@ -81,11 +75,11 @@ export class ActiveLivenessChallenge {
         : 0;
     let guidance = '';
     if (this.status === 'running') {
-      guidance = GUIDANCE[this.challenges[this.index]];
+      guidance = pick(LIVENESS_TEXT[this.challenges[this.index]]);
     } else if (this.status === 'passed') {
-      guidance = 'Liveness confirmed';
+      guidance = pick(LIVENESS_TEXT.passed);
     } else if (this.status === 'failed') {
-      guidance = 'Liveness failed';
+      guidance = pick(LIVENESS_TEXT.failed);
     }
     return {
       status: this.status,

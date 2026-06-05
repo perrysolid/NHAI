@@ -35,11 +35,13 @@ import {CAMERA} from '../config';
 import {evaluateFace} from '../camera/qualityGates';
 import {meanLuma} from '../camera/frameUtils';
 import type {Face, GateResult} from '../camera/types';
+import {pick, GATE_TEXT, getLang, setLang, type Lang} from '../i18n';
+import {speak, setSpeechEnabled} from '../speech/tts';
 import GuidanceOverlay from './GuidanceOverlay';
 
 const INITIAL_GATE: GateResult = {
   status: 'no_face',
-  guidance: 'Center your face in the circle',
+  guidance: pick(GATE_TEXT.no_face),
   ready: false,
 };
 
@@ -47,6 +49,25 @@ export default function CameraScreen(): React.JSX.Element {
   const {hasPermission, requestPermission} = useCameraPermission();
   const device = useCameraDevice('front');
   const [gate, setGate] = useState<GateResult>(INITIAL_GATE);
+  const [voice, setVoice] = useState(true);
+  const [lang, setLangState] = useState<Lang>(getLang());
+
+  useEffect(() => {
+    setSpeechEnabled(voice);
+  }, [voice]);
+
+  // Speak guidance aloud (deduped) so field staff get audible cues.
+  useEffect(() => {
+    if (voice && gate.guidance) {
+      speak(gate.guidance);
+    }
+  }, [voice, gate.guidance]);
+
+  const toggleLang = useCallback(() => {
+    const next: Lang = lang === 'hi' ? 'en' : 'hi';
+    setLang(next);
+    setLangState(next);
+  }, [lang]);
 
   const faceOptions = useMemo<FaceDetectionOptions>(
     () => ({
@@ -142,6 +163,20 @@ export default function CameraScreen(): React.JSX.Element {
       <View style={styles.badge}>
         <Text style={styles.badgeText}>Phase 2 · detect + gates · offline</Text>
       </View>
+      <View style={styles.toggles}>
+        <TouchableOpacity style={styles.toggle} onPress={toggleLang}>
+          <Text style={styles.toggleText}>
+            {lang === 'hi' ? 'हिन्दी' : 'ENG'}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.toggle, voice && styles.toggleOn]}
+          onPress={() => setVoice(v => !v)}>
+          <Text style={styles.toggleText}>
+            {voice ? 'Voice on' : 'Voice off'}
+          </Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -179,4 +214,21 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   badgeText: {color: '#fff', fontSize: 12, letterSpacing: 0.3},
+  toggles: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  toggle: {
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderColor: '#25323b',
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  toggleOn: {borderColor: '#38e0a5'},
+  toggleText: {color: '#fff', fontSize: 12, fontWeight: '600'},
 });
