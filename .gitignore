@@ -8,6 +8,13 @@ node_modules/
 npm-debug.log
 yarn-error.log
 .pnp.*
+backend/dist/
+web/test-results/
+web/playwright-report/
+web/public/icons.svg
+web/src/assets/hero.png
+web/src/assets/react.svg
+web/src/assets/vite.svg
 
 # ── Native build artifacts ──
 app/android/.gradle/

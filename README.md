@@ -23,7 +23,8 @@ path.
 | Path        | Track | What |
 |-------------|-------|------|
 | `app/`      | A     | React Native CLI app (the scored, offline core) |
-| `backend/`  | B     | Next.js/Vercel sync target + admin dashboard *(not started)* |
+| `web/`      | B     | Vercel browser demo: client-side face auth + sync/purge flow |
+| `backend/`  | B     | Render sync target + admin dashboard |
 | `docs/`     | —     | Implementation plan & notes |
 
 ## Models (on-device, < 20 MB total)
@@ -36,7 +37,8 @@ See `app/assets/models/README.md` for download + netron-verify steps.
 ## Build status (phase-gated)
 - [x] **Phase 1** — scaffold; front-camera preview runs before any ML
 - [x] **Phase 2** — face detection + quality gates (one face, ±30° pose, brightness, live guidance)
-- [ ] Phase 3 — FaceEngine (EdgeFace + MiniFASNet inference)
+- [x] **Phase 3 web demo** — Vercel-ready browser face auth + Render sync backend
+- [ ] Phase 3 native — FaceEngine (EdgeFace + MiniFASNet inference)
 - [ ] Phase 4 — dual liveness (passive + active)
 - [ ] Phase 5 — enroll + verify + encrypted MMKV store
 - [ ] Phase 6 — sync & purge to Vercel
@@ -54,3 +56,21 @@ npx react-native run-android
 > iOS builds need CocoaPods (not installed here) but share the same JS codebase.
 
 Full plan: [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
+
+## Run the web demo + sync backend
+```bash
+# terminal 1
+cd backend
+npm install
+npm run build
+npm start
+
+# terminal 2
+cd web
+npm install
+npm run dev
+```
+
+The browser demo keeps face inference local in the browser and only syncs verified
+attendance records. Deployment steps are in
+[`docs/WEB_RENDER_DEPLOYMENT.md`](docs/WEB_RENDER_DEPLOYMENT.md).

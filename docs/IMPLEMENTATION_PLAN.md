@@ -1,6 +1,6 @@
 # NHAI Innovation Hackathon 7.0 — Implementation Plan
 
-On-device offline auth (React Native) + Vercel sync backend.
+On-device offline auth (React Native) + Vercel web demo + Render sync backend.
 
 **Constraints:** React Native (Android+iOS) · 100% offline auth · <1s · >95% acc ·
 ~20MB models · Android 8+/iOS 12+ · 3GB RAM · CPU-only · open-source.
@@ -14,7 +14,7 @@ DEVICE (offline, scored): Camera → Face detect (ML Kit) → Liveness (MiniFASN
 active challenge) → Recognition (EdgeFace) → cosine match → encrypted local queue
    │ (only when network returns)
    ▼
-VERCEL (online): POST /api/sync → validate → Postgres → 200 OK → device PURGES.
+RENDER (online): POST /api/sync → validate → Postgres → 200 OK → device PURGES.
 /admin dashboard (optional Gemini summary + Groq NL query).
 ```
 Why not models on Vercel: the rubric scores offline operation (airplane-mode test);
@@ -42,10 +42,10 @@ react-native-mmkv ^2.12 · @react-native-community/netinfo ^11.
 Android: minSdk 26, compile/target 34, kotlin 1.9. Keep inference behind a
 `FaceEngine` interface so EdgeFace↔MobileFaceNet and tflite↔onnx are one-line swaps.
 
-## Vercel backend stack (Track B)
-Next.js (App Router) · Vercel Postgres or Supabase · `POST /api/sync` ·
-`GET /api/records` (auth-gated) · `/admin` dashboard · optional Gemini/Groq
-enrichment behind `ENRICHMENT_ENABLED`. Secrets via env vars.
+## Web + Render stack (Track B)
+Vite/React browser demo on Vercel · Express backend on Render · Postgres optional
+via `DATABASE_URL` · `POST /api/sync` · `GET /api/records` (auth-gated) ·
+`/admin` dashboard. Secrets via env vars.
 
 ## Build order — Track A (scored core)
 1. Get models; verify exact I/O in netron.app (prevents #1 runtime bug).
@@ -58,9 +58,9 @@ enrichment behind `ENRICHMENT_ENABLED`. Secrets via env vars.
 8. CLAHE/torch lighting; Benchmark screen.
 
 ## Build order — Track B (parallel)
-1. Next.js + `/api/sync` + DB schema `{userId,timestamp,livenessScore,matchScore,deviceId}`.
-2. `/admin` dashboard.
-3. Optional Gemini anomaly summary + Groq NL query (online-only).
+1. Vercel web demo with browser camera, local enroll/verify, active liveness, and sync queue.
+2. Render backend with `/api/sync` + DB schema `{userId,timestamp,livenessPassed,matchDistance,deviceId}`.
+3. `/admin` dashboard.
 4. Deploy; set env; hand Track A the endpoint URL.
 Integration: Track A's `SYNC_URL` config + `MOCK_MODE` flag lets the device demo the
 full sync→purge lifecycle before the backend is live.
@@ -78,7 +78,7 @@ full sync→purge lifecycle before the backend is live.
 3. Verify — passes <1s; show latency.
 4. Spoof test — printed photo + phone-screen photo → both rejected (the winning moment).
 5. Live blink/smile active challenge.
-6. Network on → records sync to Vercel dashboard → local queue purges to empty.
+6. Network on → records sync to Render dashboard → local queue purges to empty.
 7. End on Benchmark screen: <1s, ~3MB models, EdgeFace 99.73% LFW, 100% offline.
 
 ## Sources
