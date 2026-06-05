@@ -106,8 +106,12 @@ export const LIVENESS_MODEL: LivenessSpec = {
 export const THRESHOLDS = {
   /** Cosine similarity >= this means the same person. */
   recognitionCosine: 0.55,
-  /** Passive liveness "live" probability must exceed this. */
-  livenessPassive: 0.55,
+  /** Passive anti-spoof "live" probability must exceed this (defense in depth
+   *  against screen/print replays; the mandatory blink defeats static photos). */
+  livenessPassive: 0.5,
+  /** Minimum range the eye-open signal must span during a verify attempt — a
+   *  real blink swings ~0.8; a held photo stays flat. Defeats static spoofs. */
+  livenessMotionRange: 0.3,
   /** Active-challenge window (generous so real users complete it). */
   activeChallengeTimeoutMs: 9000,
   /** Quality gates — advisory guidance, kept forgiving for field use. */

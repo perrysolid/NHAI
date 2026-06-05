@@ -23,25 +23,46 @@ function shuffle<T>(items: T[], rng: () => number): T[] {
   return out;
 }
 
+/**
+ * Active liveness with a MANDATORY blink as the first challenge.
+ *
+ * The blink requires a full open -> closed -> open eye cycle, which a static
+ * photo physically cannot produce (a photo of open eyes never reads "closed";
+ * a photo of closed eyes never reads "open"). We additionally require evidence
+ * of real motion (the eye-open signal must actually vary), so detector jitter
+ * on a held photo cannot satisfy the challenge.
+ */
 export class ActiveLivenessChallenge {
   private status: LivenessStatus = 'idle';
   private challenges: ActiveChallengeKind[];
   private index = 0;
   private startedAt = 0;
-  private sawClosedEyes = false;
+  // blink cycle state
+  private blinkPhase: 'await_open' | 'await_close' | 'await_reopen' =
+    'await_open';
   private baselineYaw: number | null = null;
+  // motion evidence over the whole attempt
+  private minEye = 1;
+  private maxEye = 0;
+  private faceFrames = 0;
 
-  constructor(rng: () => number = Math.random, challengeCount = 1) {
-    this.challenges = shuffle<ActiveChallengeKind>(
-      ['blink', 'smile', 'turn'],
-      rng,
-    ).slice(0, Math.max(1, Math.min(3, challengeCount)));
+  constructor(rng: () => number = Math.random, extraChallenges = 0) {
+    // Blink is always required and always first. Optional extra challenges add
+    // friction for spoofers without weakening the photo-proof guarantee.
+    const extras = shuffle<ActiveChallengeKind>(['turn', 'smile'], rng).slice(
+      0,
+      Math.max(0, Math.min(2, extraChallenges)),
+    );
+    this.challenges = ['blink', ...extras];
   }
 
   start(now: number): LivenessSnapshot {
     this.status = 'running';
     this.index = 0;
     this.startedAt = now;
+    this.minEye = 1;
+    this.maxEye = 0;
+    this.faceFrames = 0;
     this.resetStep();
     return this.snapshot(now);
   }
@@ -49,6 +70,15 @@ export class ActiveLivenessChallenge {
   update(face: Face | null, now: number): LivenessSnapshot {
     if (this.status !== 'running') {
       return this.snapshot(now);
+    }
+    if (face) {
+      this.faceFrames += 1;
+      const eye = Math.min(
+        face.leftEyeOpenProbability ?? 1,
+        face.rightEyeOpenProbability ?? 1,
+      );
+      this.minEye = Math.min(this.minEye, eye);
+      this.maxEye = Math.max(this.maxEye, eye);
     }
     if (now - this.startedAt > THRESHOLDS.activeChallengeTimeoutMs) {
       this.status = 'failed';
@@ -58,7 +88,13 @@ export class ActiveLivenessChallenge {
       this.index += 1;
       this.resetStep();
       if (this.index >= this.challenges.length) {
-        this.status = 'passed';
+        // Final guard: the eye-open signal must have shown real variation over
+        // the attempt (a genuine blink), defeating a static presentation.
+        if (this.maxEye - this.minEye >= THRESHOLDS.livenessMotionRange) {
+          this.status = 'passed';
+        } else {
+          this.status = 'failed';
+        }
       }
     }
     return this.snapshot(now);
@@ -92,24 +128,28 @@ export class ActiveLivenessChallenge {
   }
 
   private resetStep(): void {
-    this.sawClosedEyes = false;
+    this.blinkPhase = 'await_open';
     this.baselineYaw = null;
   }
 
   private isCurrentSatisfied(face: Face): boolean {
     const current = this.challenges[this.index];
     if (current === 'blink') {
-      const left = face.leftEyeOpenProbability ?? 1;
-      const right = face.rightEyeOpenProbability ?? 1;
-      const bothClosed =
-        left <= THRESHOLDS.blinkClosedProb &&
-        right <= THRESHOLDS.blinkClosedProb;
-      const bothOpen =
-        left >= THRESHOLDS.blinkOpenProb && right >= THRESHOLDS.blinkOpenProb;
-      if (bothClosed) {
-        this.sawClosedEyes = true;
+      const eye = Math.min(
+        face.leftEyeOpenProbability ?? 1,
+        face.rightEyeOpenProbability ?? 1,
+      );
+      const open = eye >= THRESHOLDS.blinkOpenProb;
+      const closed = eye <= THRESHOLDS.blinkClosedProb;
+      // Require a full open -> closed -> open cycle.
+      if (this.blinkPhase === 'await_open' && open) {
+        this.blinkPhase = 'await_close';
+      } else if (this.blinkPhase === 'await_close' && closed) {
+        this.blinkPhase = 'await_reopen';
+      } else if (this.blinkPhase === 'await_reopen' && open) {
+        return true;
       }
-      return this.sawClosedEyes && bothOpen;
+      return false;
     }
     if (current === 'smile') {
       return (face.smilingProbability ?? 0) >= THRESHOLDS.smileProb;
@@ -123,11 +163,15 @@ export class ActiveLivenessChallenge {
   }
 }
 
+/**
+ * Combine active + passive liveness. BOTH must pass: the active blink defeats
+ * static photos, the passive anti-spoof model defeats screen / print replays.
+ */
 export function evaluateDualLiveness(input: {
   passiveScore: number;
   activeStatus: LivenessStatus;
 }): {passed: boolean; passivePassed: boolean; activePassed: boolean} {
   const passivePassed = input.passiveScore >= THRESHOLDS.livenessPassive;
   const activePassed = input.activeStatus === 'passed';
-  return {passed: activePassed, passivePassed, activePassed};
+  return {passed: activePassed && passivePassed, passivePassed, activePassed};
 }

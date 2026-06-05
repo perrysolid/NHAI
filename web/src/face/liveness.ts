@@ -38,7 +38,8 @@ export class LivenessChallenge {
   private index = 0;
   private startedAt = 0;
   // per-challenge sub-state
-  private blinkSawClosed = false;
+  private blinkPhase: 'await_open' | 'await_close' | 'await_reopen' =
+    'await_open';
   private blinkOpenEar = 0;
   private blinkMinEar = Number.POSITIVE_INFINITY;
   private turnBaselineYaw: number | null = null;
@@ -60,7 +61,7 @@ export class LivenessChallenge {
   }
 
   private resetSub(): void {
-    this.blinkSawClosed = false;
+    this.blinkPhase = 'await_open';
     this.blinkOpenEar = 0;
     this.blinkMinEar = Number.POSITIVE_INFINITY;
     this.turnBaselineYaw = null;
@@ -76,26 +77,33 @@ export class LivenessChallenge {
         this.blinkOpenEar = Math.max(this.blinkOpenEar, s.ear);
         this.blinkMinEar = Math.min(this.blinkMinEar, s.ear);
 
-        // Absolute EAR thresholds are brittle across browser webcams. Treat a
-        // sharp drop from the subject's own open-eye baseline as "closed" too.
-        const closedByAbsolute = s.ear <= LIVENESS.earClosed;
-        const closedByDrop =
-          this.blinkOpenEar > 0 &&
-          (this.blinkOpenEar - s.ear >= LIVENESS.blinkDrop ||
-            s.ear <= this.blinkOpenEar * LIVENESS.blinkClosedRatio);
-        if (closedByAbsolute || closedByDrop) {
-          this.blinkSawClosed = true;
-          return true;
-        }
+        // Absolute EAR thresholds are brittle across browser webcams, so we
+        // also treat a sharp drop from the subject's own open-eye baseline as
+        // "closed" and a recovery back toward it as "open".
+        const open =
+          s.ear >= LIVENESS.earOpen ||
+          (this.blinkOpenEar > 0 &&
+            s.ear >= this.blinkOpenEar * LIVENESS.blinkReopenRatio);
+        const closed =
+          s.ear <= LIVENESS.earClosed ||
+          (this.blinkOpenEar > 0 &&
+            (this.blinkOpenEar - s.ear >= LIVENESS.blinkDrop ||
+              s.ear <= this.blinkOpenEar * LIVENESS.blinkClosedRatio));
 
-        const reopenedByAbsolute = s.ear >= LIVENESS.earOpen;
-        const reopenedByRecovery =
-          this.blinkSawClosed &&
-          this.blinkOpenEar > 0 &&
-          Number.isFinite(this.blinkMinEar) &&
-          s.ear - this.blinkMinEar >= LIVENESS.blinkDrop &&
-          s.ear >= this.blinkOpenEar * LIVENESS.blinkReopenRatio;
-        return this.blinkSawClosed && (reopenedByAbsolute || reopenedByRecovery);
+        // Require a FULL open -> closed -> open cycle. A static photo of open
+        // eyes never closes; a photo of closed eyes never opens — both fail.
+        if (this.blinkPhase === 'await_open' && open) {
+          this.blinkPhase = 'await_close';
+        } else if (this.blinkPhase === 'await_close' && closed) {
+          this.blinkPhase = 'await_reopen';
+        } else if (this.blinkPhase === 'await_reopen' && open) {
+          // and the eye signal must have actually swung (real motion).
+          return (
+            Number.isFinite(this.blinkMinEar) &&
+            this.blinkOpenEar - this.blinkMinEar >= LIVENESS.blinkDrop
+          );
+        }
+        return false;
       }
       case 'smile':
         return s.happy >= LIVENESS.smileProb;
