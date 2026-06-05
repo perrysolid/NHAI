@@ -1,14 +1,10 @@
 /**
- * tts — offline voice prompts for the native app via react-native-tts (the
- * device's built-in TTS engine: Android TextToSpeech / iOS AVSpeechSynthesizer).
- * No network, no API key.
+ * tts — offline voice prompts via react-native-tts (the device's built-in TTS
+ * engine: Android TextToSpeech / iOS AVSpeechSynthesizer). No network, no key.
  *
- * Each prompt is a {hi, en} pair. We speak the selected language (default Hindi)
- * and only fall back to English when the device is CONFIRMED to have no voice
- * for that language. Speaking is synchronous — we never block on an async
- * setDefaultLanguage promise, so a prompt is always spoken.
- *
- * Requires a native rebuild after install (autolinking handles the native side).
+ * Simple and synchronous: initialise the engine once, then speak the selected
+ * language (default Hindi), falling back to the English text if the prompt has
+ * no Hindi string. Speaking never awaits a promise, so a prompt is always said.
  */
 import Tts from 'react-native-tts';
 import {getLang} from '../i18n';
@@ -20,42 +16,36 @@ export interface SpeechPair {
 
 let enabled = true;
 let lastSpoken = '';
+let initialised = false;
 
-// Cached list of installed voice language tags (lowercased), loaded async once.
-let installedLangs: string[] = [];
-let voicesKnown = false;
-
-function loadVoices(): void {
+/** Initialise the TTS engine. On Android, speak() is silent until this runs. */
+function init(): void {
+  if (initialised) {
+    return;
+  }
+  initialised = true;
   try {
-    Tts.voices()
-      .then(list => {
-        installedLangs = (list || [])
-          .filter(v => !v.notInstalled)
-          .map(v => String(v.language || '').toLowerCase());
-        voicesKnown = installedLangs.length > 0;
+    Tts.getInitStatus()
+      .then(() => {
+        Tts.setDefaultRate(0.5).catch(() => undefined);
+        Tts.setDefaultPitch(1.0).catch(() => undefined);
       })
-      .catch(() => {
-        voicesKnown = false;
+      .catch((err: unknown) => {
+        const code = (err as {code?: string} | null)?.code;
+        if (code === 'no_engine') {
+          Tts.requestInstallEngine().catch(() => undefined);
+        }
       });
   } catch {
-    voicesKnown = false;
+    /* ignore */
   }
 }
-loadVoices();
-
-/** True if a voice for the base language is installed, OR if unknown (we then
- *  optimistically attempt the selected language rather than stay silent). */
-function hasVoice(base: 'hi' | 'en'): boolean {
-  if (!voicesKnown) {
-    return true;
-  }
-  return installedLangs.some(l => l.startsWith(base));
-}
+init();
 
 export function setSpeechEnabled(on: boolean): void {
   enabled = on;
   if (on) {
-    loadVoices();
+    init();
   } else {
     try {
       Tts.stop();
@@ -70,27 +60,21 @@ export function isSpeechEnabled(): boolean {
   return enabled;
 }
 
-/** Speak a prompt; selected language if it has a voice, else English. */
+/** Speak a prompt in the selected language (default Hindi). */
 export function speak(pair: SpeechPair): void {
   if (!enabled || !pair) {
     return;
   }
   const lang = getLang();
-  let use: 'hi' | 'en' = lang;
-  if (lang === 'hi' && !hasVoice('hi') && hasVoice('en')) {
-    use = 'en';
-  }
-  const text = pair[use];
+  const tag = lang === 'hi' ? 'hi-IN' : 'en-US';
+  const text = pair[lang] || pair.en;
   if (!text || text === lastSpoken) {
     return;
   }
   lastSpoken = text;
   try {
     Tts.stop();
-    // fire-and-forget: do NOT await, so we always speak even if this rejects
-    Tts.setDefaultLanguage(use === 'hi' ? 'hi-IN' : 'en-US').catch(
-      () => undefined,
-    );
+    Tts.setDefaultLanguage(tag).catch(() => undefined);
     Tts.speak(text);
   } catch {
     /* TTS engine unavailable; fail silent */

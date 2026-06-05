@@ -91,12 +91,14 @@ export function speak(pair: SpeechPair | string): void {
   }
   const p: SpeechPair = typeof pair === 'string' ? {hi: pair, en: pair} : pair;
 
+  // Speak the selected language only if a voice for it is actually installed;
+  // otherwise English — so it is never silent (most devices lack a Hindi voice).
   const selected = getLang(); // 'hi' | 'en'
-  let use: 'hi' | 'en' = selected;
-  if (selected === 'hi' && !hasVoice('hi') && hasVoice('en')) {
-    use = 'en';
-  } else if (selected === 'en' && !hasVoice('en') && hasVoice('hi')) {
-    use = 'hi';
+  let use: 'hi' | 'en';
+  if (selected === 'hi') {
+    use = hasVoice('hi') ? 'hi' : 'en';
+  } else {
+    use = hasVoice('en') ? 'en' : hasVoice('hi') ? 'hi' : 'en';
   }
 
   const text = p[use];
