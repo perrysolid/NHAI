@@ -298,11 +298,12 @@
   width: 48%;
   aspect-ratio: 0.82;
   transform: translate(-50%, -50%);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 3px solid #050505;
   border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.28);
 }
 .stage--lock .reticle {
-  border-color: rgba(56, 224, 165, 0.4);
+  border-color: #050505;
 }
 .scanline {
   position: absolute;

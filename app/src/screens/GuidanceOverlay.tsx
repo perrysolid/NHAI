@@ -1,26 +1,24 @@
 /**
  * GuidanceOverlay — live framing feedback for Phase 2.
  *
- * Draws a centered alignment ring (green when capture-ready) and a guidance
+ * Draws a centered alignment oval and a guidance
  * banner. Purely presentational; the gate decision comes from qualityGates.
  */
 import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 import type {GateResult} from '../camera/types';
 
-const READY_COLOR = '#22c55e';
-const WAIT_COLOR = 'rgba(255,255,255,0.6)';
+const OVAL_COLOR = '#050505';
 
 export default function GuidanceOverlay({
   gate,
 }: {
   gate: GateResult;
 }): React.JSX.Element {
-  const color = gate.ready ? READY_COLOR : WAIT_COLOR;
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
       <View style={styles.ringWrap}>
-        <View style={[styles.ring, {borderColor: color}]} />
+        <View style={styles.ring} />
       </View>
       <View style={[styles.banner, gate.ready && styles.bannerReady]}>
         <Text style={styles.bannerText}>{gate.guidance}</Text>
@@ -40,6 +38,7 @@ const styles = StyleSheet.create({
     width: RING,
     height: RING * 1.25,
     borderRadius: RING,
+    borderColor: OVAL_COLOR,
     borderWidth: 4,
   },
   banner: {
