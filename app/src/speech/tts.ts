@@ -1,10 +1,12 @@
 /**
- * tts — offline voice prompts via react-native-tts (the device's built-in TTS
- * engine: Android TextToSpeech / iOS AVSpeechSynthesizer). No network, no key.
+ * tts — offline voice prompts via react-native-tts (Android TextToSpeech /
+ * iOS AVSpeechSynthesizer). No network, no API key — fully offline.
  *
- * Simple and synchronous: initialise the engine once, then speak the selected
- * language (default Hindi), falling back to the English text if the prompt has
- * no Hindi string. Speaking never awaits a promise, so a prompt is always said.
+ * Initialises the device TTS engine once, then speaks the selected language
+ * (default Hindi). Falls back to English if no Hindi text is provided.
+ *
+ * Uses a 2s cooldown dedup (not permanent) so liveness prompts like "blink"
+ * can repeat across challenges.
  */
 import Tts from 'react-native-tts';
 import {getLang} from '../i18n';
@@ -15,20 +17,26 @@ export interface SpeechPair {
 }
 
 let enabled = true;
-let lastSpoken = '';
+let lastText = '';
+let lastTime = 0;
 let initialised = false;
+
+const DEDUP_MS = 2000;
 
 /** Initialise the TTS engine. On Android, speak() is silent until this runs. */
 function init(): void {
-  if (initialised) {
-    return;
-  }
+  if (initialised) return;
   initialised = true;
   try {
     Tts.getInitStatus()
       .then(() => {
         Tts.setDefaultRate(0.5).catch(() => undefined);
         Tts.setDefaultPitch(1.0).catch(() => undefined);
+        // Pre-set to Hindi so the engine downloads the voice data early.
+        Tts.setDefaultLanguage('hi-IN').catch(() => {
+          // Hindi unavailable — English will be used as fallback.
+          Tts.setDefaultLanguage('en-US').catch(() => undefined);
+        });
       })
       .catch((err: unknown) => {
         const code = (err as {code?: string} | null)?.code;
@@ -53,7 +61,8 @@ export function setSpeechEnabled(on: boolean): void {
       /* ignore */
     }
   }
-  lastSpoken = '';
+  lastText = '';
+  lastTime = 0;
 }
 
 export function isSpeechEnabled(): boolean {
@@ -62,16 +71,19 @@ export function isSpeechEnabled(): boolean {
 
 /** Speak a prompt in the selected language (default Hindi). */
 export function speak(pair: SpeechPair): void {
-  if (!enabled || !pair) {
-    return;
-  }
+  if (!enabled || !pair) return;
+
   const lang = getLang();
-  const tag = lang === 'hi' ? 'hi-IN' : 'en-US';
   const text = pair[lang] || pair.en;
-  if (!text || text === lastSpoken) {
-    return;
-  }
-  lastSpoken = text;
+  if (!text) return;
+
+  // Cooldown dedup — allow repeats after 2s.
+  const now = Date.now();
+  if (text === lastText && now - lastTime < DEDUP_MS) return;
+  lastText = text;
+  lastTime = now;
+
+  const tag = lang === 'hi' ? 'hi-IN' : 'en-US';
   try {
     Tts.stop();
     Tts.setDefaultLanguage(tag).catch(() => undefined);
