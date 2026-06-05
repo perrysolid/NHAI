@@ -27,10 +27,10 @@ export const FLAGS = {
 // ────────────────────────────────────────────────────────────────────────────
 // Recognition model (swappable engine)
 // ────────────────────────────────────────────────────────────────────────────
-export type RecognitionModelId = 'edgeface_s' | 'mobilefacenet';
+export type RecognitionModelId = 'edgeface_s' | 'mobilefacenet' | 'facenet_512';
 
 /** Active recognition model — swap this one line to change the engine. */
-export const ACTIVE_RECOGNITION: RecognitionModelId = 'edgeface_s';
+export const ACTIVE_RECOGNITION: RecognitionModelId = 'facenet_512';
 
 export interface RecognitionSpec {
   /** require()'d asset, resolved lazily in FaceEngine to keep config pure. */
@@ -67,6 +67,17 @@ export const RECOGNITION_MODELS: Record<RecognitionModelId, RecognitionSpec> = {
     embeddingLength: 512,
     dtype: 'float32',
   },
+  // Bundled runnable fallback for the demo while EdgeFace-S is converted.
+  // Source: shubham0204/OnDevice-Face-Recognition-Android (Apache-2.0).
+  facenet_512: {
+    assetName: 'facenet_512.tflite',
+    inputSize: 160,
+    channels: 3,
+    mean: [0.5, 0.5, 0.5],
+    std: [0.5, 0.5, 0.5],
+    embeddingLength: 512,
+    dtype: 'float32',
+  },
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -76,6 +87,9 @@ export interface LivenessSpec {
   assetName: string;
   inputSize: number;
   channels: 3;
+  /** per-channel normalization: (pixel/255 - mean) / std */
+  mean: [number, number, number];
+  std: [number, number, number];
   /** MiniFASNet is trained on a crop ~2.7x the face bbox. */
   bboxExpansion: number;
   /** softmax index that means "real/live". */
@@ -89,6 +103,8 @@ export const LIVENESS_MODEL: LivenessSpec = {
   assetName: 'minifasnet.tflite',
   inputSize: 80,
   channels: 3,
+  mean: [0, 0, 0],
+  std: [1, 1, 1],
   bboxExpansion: 2.7,
   liveClassIndex: 1,
   dtype: 'float32',

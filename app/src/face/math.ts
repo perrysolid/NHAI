@@ -62,7 +62,7 @@ export function cosineSimilarity(
 export function matchEmbedding(
   probe: ArrayLike<number>,
   enrolled: ArrayLike<number>,
-  threshold = THRESHOLDS.recognitionCosine,
+  threshold: number = THRESHOLDS.recognitionCosine,
 ): MatchResult {
   const cosine = cosineSimilarity(probe, enrolled);
   return {cosine, matched: cosine >= threshold};

@@ -23,6 +23,9 @@ test); serverless cold-starts + payload limits make vision inference unreliable.
 The honest online role is only the sync/admin half.
 
 ## Models (on-device footprint < 20 MB)
+- **FaceNet-512** — bundled runnable demo recognition model from
+  shubham0204/OnDevice-Face-Recognition-Android. Larger than the target compact
+  footprint, but available as TFLite now.
 - **EdgeFace-S** (George et al., TBIOM 2024) — IJCB'23 Efficient FR Competition
   compact-track winner. 1.77M params, 99.73% LFW. 112×112×3, mean/std 0.5 →
   512-d embedding → cosine. Export PyTorch→ONNX→TFLite INT8 (~1–2 MB).
@@ -52,8 +55,8 @@ via `DATABASE_URL` · `POST /api/sync` · `GET /api/records` (auth-gated) ·
 1. Get models; verify exact I/O in netron.app (prevents #1 runtime bug).
 2. Scaffold → blank camera preview RUNS on Android (go/no-go gate).  ← **Phase 1**
 3. Face detection + quality gates (one face, ±30° pose, brightness).
-4. FaceEngine: interface + model manifest + mock fallback are in code; real
-   EdgeFace/MiniFASNet `.tflite` assets still need final native runtime wiring.
+4. FaceEngine: TFLite engine wired with bundled FaceNet-512 + MiniFASNet; replace
+   FaceNet with EdgeFace-S INT8 for compact final build.
 5. Liveness: passive >0.7 AND active challenge within timeout.
 6. Enroll (avg 3 embeddings) + verify (cosine ≥0.55) + encrypted MMKV queue.
 7. Sync client: online → POST queue to Render → on 200 purge.

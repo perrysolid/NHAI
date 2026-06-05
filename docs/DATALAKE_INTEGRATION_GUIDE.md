@@ -24,11 +24,15 @@ The backend is never part of the authentication decision.
 
 ## Required Native Model Assets
 
-Drop these files into `app/assets/models/`:
+The runnable native demo already includes:
+
+- `facenet_512.tflite`
+- `minifasnet.tflite`
+
+For the compact production target, add:
 
 - `edgeface_s.tflite`
 - `mobilefacenet.tflite` optional fallback
-- `minifasnet.tflite`
 
 Before demoing production inference, open each file in Netron and confirm the
 I/O in `app/src/config.ts`.
@@ -46,6 +50,7 @@ The native sync client sends:
       "livenessPassed": true,
       "livenessScore": 0.91,
       "matchScore": 0.74,
+      "matchDistance": 0.74,
       "deviceId": "rn-device"
     }
   ]

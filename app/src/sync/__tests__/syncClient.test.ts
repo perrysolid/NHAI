@@ -17,6 +17,7 @@ describe('syncClient', () => {
       userId: 'u1',
       livenessPassed: true,
       matchScore: 0.9,
+      matchDistance: 0.9,
     });
   });
 

@@ -2,9 +2,17 @@ import {
   ACTIVE_RECOGNITION,
   LIVENESS_MODEL,
   RECOGNITION_MODELS,
+  type RecognitionSpec,
   type RecognitionModelId,
 } from '../config';
 import {l2Normalize, type Embedding} from './math';
+import {LIVENESS_ASSET, RECOGNITION_ASSETS} from './modelAssets';
+
+import {
+  loadTensorflowModel,
+  type TensorflowModel,
+  type TensorflowModelDelegate,
+} from 'react-native-fast-tflite';
 
 export type TensorInput = Float32Array | Uint8Array;
 
@@ -25,6 +33,121 @@ export function getModelManifest(
   model: RecognitionModelId = ACTIVE_RECOGNITION,
 ): ModelManifest {
   return {recognition: RECOGNITION_MODELS[model], liveness: LIVENESS_MODEL};
+}
+
+export interface TfliteFaceEngineOptions {
+  recognitionModel?: RecognitionModelId;
+  delegate?: TensorflowModelDelegate;
+}
+
+export class TfliteFaceEngine implements FaceEngine {
+  readonly recognitionModel: RecognitionModelId;
+  readonly embeddingLength: number;
+
+  private recognition?: TensorflowModel;
+  private liveness?: TensorflowModel;
+  private delegate: TensorflowModelDelegate;
+
+  constructor(options: TfliteFaceEngineOptions = {}) {
+    this.recognitionModel = options.recognitionModel ?? ACTIVE_RECOGNITION;
+    this.embeddingLength =
+      RECOGNITION_MODELS[this.recognitionModel].embeddingLength;
+    this.delegate = options.delegate ?? 'default';
+  }
+
+  async load(): Promise<void> {
+    const recognitionAsset = RECOGNITION_ASSETS[this.recognitionModel];
+    if (!recognitionAsset) {
+      throw new Error(
+        `No bundled TFLite asset for ${
+          this.recognitionModel
+        }. Convert/download ${
+          RECOGNITION_MODELS[this.recognitionModel].assetName
+        } first.`,
+      );
+    }
+    const [recognition, liveness] = await Promise.all([
+      loadTensorflowModel(recognitionAsset, this.delegate),
+      loadTensorflowModel(LIVENESS_ASSET, this.delegate),
+    ]);
+    this.recognition = recognition;
+    this.liveness = liveness;
+    this.assertModelShapes();
+  }
+
+  async embedFace(input: TensorInput): Promise<Embedding> {
+    const model = this.requireRecognition();
+    const [output] = await model.run([input]);
+    if (!output || output.length !== this.embeddingLength) {
+      throw new Error(
+        `Recognition output length ${output?.length ?? 0} did not match ${
+          this.embeddingLength
+        }`,
+      );
+    }
+    return l2Normalize(asNumberArray(output));
+  }
+
+  async scoreLive(input: TensorInput): Promise<number> {
+    const model = this.requireLiveness();
+    const [output] = await model.run([input]);
+    if (!output || output.length <= LIVENESS_MODEL.liveClassIndex) {
+      throw new Error('Liveness model returned an invalid output tensor');
+    }
+    return probabilityAt(asNumberArray(output), LIVENESS_MODEL.liveClassIndex);
+  }
+
+  private requireRecognition(): TensorflowModel {
+    if (!this.recognition) {
+      throw new Error('FaceEngine not loaded. Call load() first.');
+    }
+    return this.recognition;
+  }
+
+  private requireLiveness(): TensorflowModel {
+    if (!this.liveness) {
+      throw new Error('FaceEngine not loaded. Call load() first.');
+    }
+    return this.liveness;
+  }
+
+  private assertModelShapes(): void {
+    const recognition = this.requireRecognition();
+    const expected = RECOGNITION_MODELS[this.recognitionModel];
+    const input = recognition.inputs[0];
+    if (input) {
+      const flattened = product(input.shape.filter(n => n > 0));
+      const expectedFlat =
+        expected.inputSize * expected.inputSize * expected.channels;
+      if (flattened !== expectedFlat) {
+        throw new Error(
+          `Recognition input shape ${input.shape.join('x')} does not match ${
+            expected.assetName
+          } config`,
+        );
+      }
+    }
+  }
+}
+
+export function preprocessRgb(
+  rgb: Uint8Array,
+  spec: RecognitionSpec | typeof LIVENESS_MODEL,
+): TensorInput {
+  const expected = spec.inputSize * spec.inputSize * spec.channels;
+  if (rgb.length !== expected) {
+    throw new Error(`Expected ${expected} RGB bytes, got ${rgb.length}`);
+  }
+  if (spec.dtype === 'uint8') {
+    return rgb;
+  }
+  const out = new Float32Array(rgb.length);
+  for (let i = 0; i < rgb.length; i += 3) {
+    out[i] = rgb[i] / 255 / spec.std[0] - spec.mean[0] / spec.std[0];
+    out[i + 1] = rgb[i + 1] / 255 / spec.std[1] - spec.mean[1] / spec.std[1];
+    out[i + 2] = rgb[i + 2] / 255 / spec.std[2] - spec.mean[2] / spec.std[2];
+  }
+  return out;
 }
 
 /**
@@ -98,4 +221,27 @@ export class MissingModelFaceEngine implements FaceEngine {
     await this.load();
     throw new Error('unreachable');
   }
+}
+
+function product(values: number[]): number {
+  return values.reduce((acc, value) => acc * value, 1);
+}
+
+function probabilityAt(values: ArrayLike<number>, index: number): number {
+  const sum = Array.from(values).reduce((acc, value) => acc + value, 0);
+  if (sum > 0.99 && sum < 1.01) {
+    return values[index];
+  }
+  const exps = Array.from(values, value => Math.exp(value));
+  const denom = exps.reduce((acc, value) => acc + value, 0) || 1;
+  return exps[index] / denom;
+}
+
+function asNumberArray(values: ArrayLike<unknown>): ArrayLike<number> {
+  for (let i = 0; i < values.length; i++) {
+    if (typeof values[i] !== 'number') {
+      throw new Error('Model output must be a numeric typed array');
+    }
+  }
+  return values as ArrayLike<number>;
 }

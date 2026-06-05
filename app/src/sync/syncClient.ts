@@ -16,6 +16,7 @@ export function toSyncPayload(records: AttendanceRecord[]): {
     livenessPassed: boolean;
     livenessScore: number;
     matchScore: number;
+    matchDistance: number;
     deviceId: string;
   }>;
 } {
@@ -26,6 +27,7 @@ export function toSyncPayload(records: AttendanceRecord[]): {
       livenessPassed: r.livenessScore >= 0.7,
       livenessScore: r.livenessScore,
       matchScore: r.matchScore,
+      matchDistance: r.matchScore,
       deviceId: r.deviceId,
     })),
   };
