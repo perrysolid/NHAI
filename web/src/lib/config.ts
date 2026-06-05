@@ -45,9 +45,9 @@ export const LIVENESS = {
   earClosed: 0.2,
   earOpen: 0.25,
   /** Also accept a relative EAR drop; browser landmarks vary by camera/face. */
-  blinkDrop: 0.045,
-  blinkClosedRatio: 0.78,
-  blinkReopenRatio: 0.9,
+  blinkDrop: 0.025,
+  blinkClosedRatio: 0.86,
+  blinkReopenRatio: 0.82,
   /** yaw delta (deg) to count a head turn. */
   headTurnDeltaDeg: 18,
   /** whole active challenge must complete within this window. */

@@ -45,10 +45,11 @@ export class LivenessChallenge {
 
   constructor(rng: () => number = Math.random) {
     const pool: ChallengeKind[] = ['blink', 'smile', 'turn'];
-    this.challenges = shuffle(pool, rng).slice(
-      0,
-      Math.max(1, Math.min(LIVENESS.challengeCount, pool.length)),
-    );
+    const count = Math.max(1, Math.min(LIVENESS.challengeCount, pool.length));
+    // Demo verification uses a single active challenge. Make that challenge
+    // explicit so a user who blinks is not silently being asked to smile/turn.
+    this.challenges =
+      count === 1 ? ['blink'] : shuffle(pool, rng).slice(0, count);
   }
 
   start(now: number): void {
@@ -84,6 +85,7 @@ export class LivenessChallenge {
             s.ear <= this.blinkOpenEar * LIVENESS.blinkClosedRatio);
         if (closedByAbsolute || closedByDrop) {
           this.blinkSawClosed = true;
+          return true;
         }
 
         const reopenedByAbsolute = s.ear >= LIVENESS.earOpen;
