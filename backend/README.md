@@ -1,8 +1,8 @@
 # DatalakeFaceAuth Sync Backend
 
-Express backend intended for Render. It is not in the authentication path:
-devices or browsers authenticate faces locally, then sync verified attendance
-records here when online.
+Express backend deployable on AWS or Render. It is not in the authentication
+path: devices or browsers authenticate faces locally, then sync verified
+attendance records here when online.
 
 ## Endpoints
 
@@ -24,7 +24,7 @@ npm start
 ```
 
 Without `DATABASE_URL`, the service uses an in-memory store. Set `DATABASE_URL`
-to a Postgres connection string on Render for durable storage.
+to a managed Postgres connection string on AWS or Render for durable storage.
 
 ## Render
 
@@ -37,3 +37,10 @@ Create a Render Web Service with Root Directory set to `backend`.
   - `ADMIN_PASSCODE`: query key for `/admin`
   - `CORS_ORIGIN`: Vercel frontend origin, for example `https://your-app.vercel.app`
   - `DATABASE_URL`: optional Postgres URL
+
+## AWS
+
+The same service can run behind API Gateway/Lambda, ECS/Fargate, or Elastic
+Beanstalk. Keep `API_KEY`, `ADMIN_PASSCODE`, `CORS_ORIGIN`, and `DATABASE_URL`
+as environment variables, then point the native `SYNC.url` to
+`https://YOUR-SYNC-ENDPOINT/api/sync`.

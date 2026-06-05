@@ -1,9 +1,9 @@
 /**
  * store — attendance record persistence.
  *
- * Uses Postgres when DATABASE_URL is set (recommended on Render for durability),
- * otherwise an in-memory store so the service deploys and runs instantly for a
- * demo. Both dedupe on (userId, timestamp, deviceId).
+ * Uses Postgres when DATABASE_URL is set (recommended on AWS/Render for
+ * durability), otherwise an in-memory store so the service deploys and runs
+ * instantly for a demo. Both dedupe on (userId, timestamp, deviceId).
  */
 import {Pool} from 'pg';
 

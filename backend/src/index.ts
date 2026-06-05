@@ -1,5 +1,5 @@
 /**
- * DatalakeFaceAuth sync backend (Render).
+ * DatalakeFaceAuth sync backend (AWS/Render-compatible).
  *
  * Receives attendance records the device already verified OFFLINE and stores
  * them. It never does face recognition. Endpoints:

@@ -2,7 +2,7 @@
  * auth — simple shared-secret check for sync/records endpoints.
  *
  * If API_KEY is unset, auth is disabled (handy for first-deploy / demos) but we
- * log a warning. Set API_KEY in the Render env for any real use.
+ * log a warning. Set API_KEY in the deployment env for any real use.
  */
 import type {NextFunction, Request, Response} from 'express';
 

@@ -27,7 +27,7 @@ export const FLAGS = {
 // ────────────────────────────────────────────────────────────────────────────
 // Recognition model (swappable engine)
 // ────────────────────────────────────────────────────────────────────────────
-export type RecognitionModelId = 'edgeface_s' | 'mobilefacenet' | 'facenet_512';
+export type RecognitionModelId = 'edgeface_s' | 'mobilefacenet';
 
 /** Active recognition model — swap this one line to change the engine. */
 export const ACTIVE_RECOGNITION: RecognitionModelId = 'mobilefacenet';
@@ -56,8 +56,9 @@ export const RECOGNITION_MODELS: Record<RecognitionModelId, RecognitionSpec> = {
     embeddingLength: 512,
     dtype: 'float32',
   },
-  // MobileFaceNet — proven fallback (99.55% LFW, ArcFace-trained). Same I/O
-  // contract so it drops in behind the same FaceEngine interface.
+  // MobileFaceNet — bundled compact runnable recognition model. The previous
+  // FaceNet-512 option was runnable but ~45 MB, so it is intentionally not
+  // bundled for the NHAI lightweight target.
   mobilefacenet: {
     assetName: 'mobilefacenet.tflite',
     inputSize: 112,
@@ -65,17 +66,6 @@ export const RECOGNITION_MODELS: Record<RecognitionModelId, RecognitionSpec> = {
     mean: [0.5, 0.5, 0.5],
     std: [0.5, 0.5, 0.5],
     embeddingLength: 192,
-    dtype: 'float32',
-  },
-  // Bundled runnable fallback for the demo while EdgeFace-S is converted.
-  // Source: shubham0204/OnDevice-Face-Recognition-Android (Apache-2.0).
-  facenet_512: {
-    assetName: 'facenet_512.tflite',
-    inputSize: 160,
-    channels: 3,
-    mean: [0.5, 0.5, 0.5],
-    std: [0.5, 0.5, 0.5],
-    embeddingLength: 512,
     dtype: 'float32',
   },
 };
@@ -146,8 +136,8 @@ export const CAMERA = {
 // Sync (offline → online). NEVER referenced in the auth path.
 // ────────────────────────────────────────────────────────────────────────────
 export const SYNC = {
-  /** Render endpoint. Filled in once Track B is deployed. */
-  url: 'https://YOUR-RENDER-SERVICE.onrender.com/api/sync',
+  /** AWS/Render-compatible endpoint. Filled in once the sync service is deployed. */
+  url: 'https://YOUR-SYNC-ENDPOINT/api/sync',
   /** Shared secret sent as x-api-key. Move to secure storage for production. */
   apiKey: 'CHANGE_ME',
   batchSize: 50,

@@ -2,7 +2,7 @@
   "name": "datalake-face-sync",
   "version": "1.0.0",
   "private": true,
-  "description": "Render backend: offline→online attendance sync target + admin for DatalakeFaceAuth",
+  "description": "AWS/Render-compatible offline→online attendance sync target + admin for DatalakeFaceAuth",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

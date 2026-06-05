@@ -7,7 +7,6 @@ The bundled demo ships runnable `.tflite` files here. `metro.config.js` bundles
 |-----------------------|---------------------|--------------|-------------------------|--------|
 | `mobilefacenet.tflite` | recognition (bundled compact demo) | 112×112×3, mean/std 0.5 | 192-d embedding | pub.dev/packages/face_detection_tflite |
 | `edgeface_s.tflite`   | recognition (compact production target) | 112×112×3, mean/std 0.5 | 512-d embedding | github.com/otroshi/edgeface (`edgeface_s_gamma_05.pt` → ONNX → TFLite INT8) |
-| `mobilefacenet.tflite`| recognition (compact fallback target) | 112×112×3, mean/std 0.5 | 512-d embedding | ArcFace MobileFaceNet TFLite export |
 | `minifasnet.tflite`   | liveness (passive)  | 80×80×3 (2.7× bbox) | 3-class softmax (idx 1 = live) | github.com/shubham0204/OnDevice-Face-Recognition-Android |
 
 ## Before coding against a model: verify it in netron
@@ -33,3 +32,7 @@ the #1 cause of runtime crashes. Update `src/config.ts` — never the worklets.
 This keeps the bundled model assets around 10.7 MB. For the final lowest-footprint
 build, replace `ACTIVE_RECOGNITION` in `app/src/config.ts` with `edgeface_s`
 after converting EdgeFace-S to TFLite INT8.
+
+FaceNet-512 was tested as a runnable recognition option but is not bundled here
+because its approximate 45 MB footprint misses the original compact model
+target.

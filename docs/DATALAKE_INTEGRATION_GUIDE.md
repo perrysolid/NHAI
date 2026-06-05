@@ -6,8 +6,8 @@
   enrollment, verification, and queueing offline.
 - Vercel web demo: deployable browser version for judges to test without an
   Android device.
-- Render backend: receives already-verified attendance records and exposes
-  `/admin`.
+- AWS/Render-compatible backend: receives already-verified attendance records
+  and exposes `/admin`.
 
 The backend is never part of the authentication decision.
 
@@ -19,8 +19,8 @@ The backend is never part of the authentication decision.
 4. Active liveness must pass blink, smile, or head-turn challenges.
 5. Recognition compares the probe embedding against encrypted local templates.
 6. A verified record is added to the local queue.
-7. When online, `syncPending()` posts the queue to Render and purges records only
-   after a successful response.
+7. When online, `syncPending()` posts the queue to the configured AWS/Render
+   endpoint and purges records only after a successful response.
 
 ## Required Native Model Assets
 
@@ -57,7 +57,8 @@ The native sync client sends:
 }
 ```
 
-Render accepts this at `POST /api/sync` with `x-api-key`.
+The backend accepts this at `POST /api/sync` with `x-api-key`. The same Express
+service can be hosted on AWS or Render; authentication never depends on it.
 
 ## Demo Checklist
 
@@ -66,5 +67,5 @@ Render accepts this at `POST /api/sync` with `x-api-key`.
 3. Verify the same user locally.
 4. Fail a spoof attempt by missing active liveness.
 5. Re-enable network.
-6. Sync queue to Render.
+6. Sync queue to the configured AWS/Render endpoint.
 7. Open `/admin?key=...` and show the record.

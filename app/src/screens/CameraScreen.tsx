@@ -26,7 +26,7 @@ import {
 } from 'react-native-vision-camera';
 import {
   useFaceDetector,
-  type FrameFaceDetectionOptions,
+  type FaceDetectionOptions,
 } from 'react-native-vision-camera-face-detector';
 import {useResizePlugin} from 'vision-camera-resize-plugin';
 import {Worklets} from 'react-native-worklets-core';
@@ -48,7 +48,7 @@ export default function CameraScreen(): React.JSX.Element {
   const device = useCameraDevice('front');
   const [gate, setGate] = useState<GateResult>(INITIAL_GATE);
 
-  const faceOptions = useMemo<FrameFaceDetectionOptions>(
+  const faceOptions = useMemo<FaceDetectionOptions>(
     () => ({
       performanceMode: 'fast',
       landmarkMode: 'none',

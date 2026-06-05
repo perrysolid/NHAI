@@ -2,17 +2,17 @@
 
 On-device, **100% offline** face recognition + liveness (React Native, Android &
 iOS). Recognition + liveness run entirely on the device. The browser demo deploys
-to Vercel, while a Render backend is used **only** as the offline→online sync
-target and admin dashboard — never in the auth path.
+to Vercel, while an AWS/Render-compatible backend is used **only** as the
+offline→online sync target and admin dashboard — never in the auth path.
 
 ```
         ┌──────────────────── DEVICE (offline, scored) ────────────────────┐
         │ Camera → Face detect (ML Kit) → Liveness (MiniFASNet + active) →  │
-        │ Recognition (EdgeFace) → cosine match → encrypted local queue     │
+        │ Recognition (MobileFaceNet now; EdgeFace-S target) → local queue  │
         └─────────────────────────────┬────────────────────────────────────┘
                                        │  (only when network returns)
                                        ▼
-        ┌──────────────────── RENDER (online, not in auth path) ───────────┐
+        ┌────────────── AWS/RENDER (online, not in auth path) ─────────────┐
         │ POST /api/sync → validate → Postgres → 200 OK → device PURGES     │
         │ /admin dashboard (optional Gemini summary + Groq NL query)        │
         └──────────────────────────────────────────────────────────────────┘
@@ -24,25 +24,24 @@ target and admin dashboard — never in the auth path.
 |-------------|-------|------|
 | `app/`      | A     | React Native CLI app (the scored, offline core) |
 | `web/`      | B     | Vercel browser demo: client-side face auth + sync/purge flow |
-| `backend/`  | B     | Render sync target + admin dashboard |
+| `backend/`  | B     | AWS/Render-compatible sync target + admin dashboard |
 | `docs/`     | —     | Implementation plan & notes |
 
 ## Models
-- **EdgeFace-S** — recognition, 99.73% LFW @ 1.77M params (IJCB'23 compact-track winner)
-- **MobileFaceNet** — proven fallback behind the same `FaceEngine` interface
+- **MobileFaceNet** — bundled compact runnable recognition model
 - **MiniFASNetV2-SE** — passive anti-spoof, paired with an active blink/smile/turn challenge
-- **MobileFaceNet** — bundled compact runnable demo recognition model
+- **EdgeFace-S** — final compact recognition target, 99.73% LFW @ 1.77M params after TFLite INT8 conversion
 
 See `app/assets/models/README.md` for download + netron-verify steps.
 
 ## Build status (phase-gated)
 - [x] **Phase 1** — scaffold; front-camera preview runs before any ML
 - [x] **Phase 2** — face detection + quality gates (one face, ±30° pose, brightness, live guidance)
-- [x] **Phase 3 web demo** — Vercel-ready browser face auth + Render sync backend
+- [x] **Phase 3 web demo** — Vercel-ready browser face auth + AWS/Render-compatible sync backend
 - [x] **Phase 3 native** — FaceEngine interface, model manifest, deterministic mock fallback
 - [x] **Phase 4** — dual liveness logic (passive score + active blink/smile/turn)
 - [x] **Phase 5** — enroll + verify + encrypted MMKV-backed store
-- [x] **Phase 6** — sync & purge client for Render backend
+- [x] **Phase 6** — sync & purge client for AWS/Render-compatible backend
 - [x] **Phase 7** — lighting robustness + benchmark helpers
 - [x] **Phase 8** — README + Datalake 3.0 integration guide
 
@@ -59,6 +58,9 @@ npx react-native run-android
 Full plan: [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
 Integration guide:
 [`docs/DATALAKE_INTEGRATION_GUIDE.md`](docs/DATALAKE_INTEGRATION_GUIDE.md).
+Submission alignment:
+[`docs/NHAI_HACKATHON_ALIGNMENT.md`](docs/NHAI_HACKATHON_ALIGNMENT.md).
+Test report: [`docs/TEST_REPORT.md`](docs/TEST_REPORT.md).
 
 ## Run the web demo + sync backend
 ```bash
@@ -80,5 +82,6 @@ attendance records. Deployment steps are in
 
 > Native model note: the app now bundles MobileFaceNet + MiniFASNet `.tflite`
 > assets and a `react-native-fast-tflite` engine. Combined model assets are about
-> 10.7 MB; swap `ACTIVE_RECOGNITION` to `edgeface_s` after converting EdgeFace-S
-> to TFLite INT8 for an even smaller final build.
+> 10.7 MB. FaceNet-512 was removed because it is runnable but about 45 MB; swap
+> `ACTIVE_RECOGNITION` to `edgeface_s` after converting EdgeFace-S to TFLite
+> INT8 for the final compact build.
