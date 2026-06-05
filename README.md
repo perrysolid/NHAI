@@ -62,6 +62,8 @@ Integration guide:
 [`docs/DATALAKE_INTEGRATION_GUIDE.md`](docs/DATALAKE_INTEGRATION_GUIDE.md).
 Submission alignment:
 [`docs/NHAI_HACKATHON_ALIGNMENT.md`](docs/NHAI_HACKATHON_ALIGNMENT.md).
+Monitoring & dashboard:
+[`docs/MONITORING_AND_DASHBOARD.md`](docs/MONITORING_AND_DASHBOARD.md).
 Test report: [`docs/TEST_REPORT.md`](docs/TEST_REPORT.md).
 
 ## Run the web demo + sync backend
