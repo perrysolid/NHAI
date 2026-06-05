@@ -1,0 +1,37 @@
+# ── Models (downloaded, not committed) ──
+*.tflite
+*.onnx
+*.pt
+
+# ── Node ──
+node_modules/
+npm-debug.log
+yarn-error.log
+.pnp.*
+
+# ── Native build artifacts ──
+app/android/.gradle/
+app/android/app/build/
+app/android/build/
+app/android/local.properties
+app/ios/Pods/
+app/ios/build/
+app/ios/*.xcworkspace
+DerivedData/
+*.hprof
+
+# ── Metro / RN ──
+.metro-health-check*
+*.jsbundle
+
+# ── Env / secrets ──
+.env
+.env.*
+!.env.example
+
+# ── Agent / editor / OS ──
+.claude/
+.DS_Store
+*.log
+.vscode/
+.idea/
