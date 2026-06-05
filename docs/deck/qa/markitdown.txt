@@ -1,0 +1,369 @@
+<!-- Slide number: 1 -->
+
+NHAI INNOVATION HACKATHON 7.0  ·  DATALAKE 3.0
+
+Datalake Face Auth
+
+Secure offline facial recognition + liveness detection for field personnel in zero-network zones
+
+AUTH READY
+
+React Native / Android + iOS
+
+100% offline auth
+
+~10.7 MB models
+Android APK  Download from README / docs/deliverables     Web demo  nhai-three.vercel.app
+
+### Notes:
+
+<!-- Slide number: 2 -->
+THE PROBLEM
+Authenticating field staff where there is no network
+
+How can we accurately and securely authenticate field personnel using facial recognition and liveness detection on standard mid-range mobile devices without any active internet connection, while keeping the AI model lightweight and integrated into a React Native app on both Android and iOS?
+
+OFFLINE
+LIGHTWEIGHT
+FAST
+INCLUSIVE
+Zero network in the auth path
+~20 MB model budget
+< 1 second per verification
+Indian faces, outdoor light
+DATALAKE FACE AUTH
+NHAI DATALAKE 3.0
+01
+
+### Notes:
+
+<!-- Slide number: 3 -->
+OUR SOLUTION
+A fully offline biometric pipeline, on the device
+On-device inference
+Detection, liveness and recognition all run locally with bundled TFLite models. No image ever leaves the device.
+
+1
+Dual liveness
+Passive anti-spoof (MiniFASNet) plus an active blink / smile / turn challenge that defeats photos and screens.
+
+2
+Lightweight + fast
+MobileFaceNet + MiniFASNet at ~10.7 MB, CPU-only, with a measured sub-second recognition budget.
+
+3
+Sync, then purge
+Verified records queue locally and sync to AWS/Render only when the network returns, then purge.
+
+4
+DATALAKE FACE AUTH
+NHAI DATALAKE 3.0
+02
+
+### Notes:
+
+<!-- Slide number: 4 -->
+ARCHITECTURE
+Auth on-device; the cloud is only a sync target
+
+DEVICE  —  fully offline, scored
+AWS / RENDER  —  not in auth path
+
+Camera
+POST /api/sync
+
+Face detect
+
+Quality gates
+Validate + store
+
+Liveness
+on reconnect
+Device purges queue
+
+Recognition
+
+Auth score
+Ops dashboard + analytics
+
+Encrypted queue
+No recognition ever happens server-side. The device decides authentication entirely offline.
+DATALAKE FACE AUTH
+NHAI DATALAKE 3.0
+03
+
+### Notes:
+
+<!-- Slide number: 5 -->
+HOW A VERIFICATION WORKS
+Detect → liveness → recognize → score → sync
+
+1
+
+2
+
+3
+
+4
+
+5
+›
+›
+›
+›
+Quality gates
+Active liveness
+Recognition
+Composite score
+Queue + sync
+One face, frontal pose, adequate light
+Randomized blink / smile / head-turn
+512-d embedding, multi-frame best match
+Weighted 0-100 trust score
+Record stored, then purged on sync
+A static photo cannot complete the live challenge — so print and screen spoofs are rejected before recognition.
+DATALAKE FACE AUTH
+NHAI DATALAKE 3.0
+04
+
+### Notes:
+
+<!-- Slide number: 6 -->
+ANTI-SPOOFING
+Two layers of liveness defeat fraud
+
+PASSIVE
+ACTIVE
+MiniFASNet anti-spoof
+Randomized challenge
+Silent RGB anti-spoof model (~5.7 MB)
+Scores texture / depth cues per frame
+Catches printed photos and replays
+Runs on-device, no user effort
+Blink, smile or head-turn on demand
+Randomized order within a 7s window
+Verified from ML Kit eye/smile/pose
+A photo or screen cannot respond live
+Blocked attempts are counted on-device and surfaced as a "presentation attacks blocked" KPI on the dashboard.
+DATALAKE FACE AUTH
+NHAI DATALAKE 3.0
+05
+
+### Notes:
+
+<!-- Slide number: 7 -->
+BONUS  ·  ON-DEVICE MONITORING
+Drowsiness & attention, from the same landmarks
+
+EAR
+PERCLOS
+BLINK RATE
+MICRO-SLEEP
+LOOK-AWAY
+Eye openness per frame
+% eyes-closed over a window
+Fatigue indicator
+Sustained eye closure
+Sustained head yaw
+
+No extra model, no network
+All metrics are derived on-device from the 68-point face landmarks already used for liveness. The snapshot is attached to each verified record and powers the dashboard’s fatigue analytics.
+DATALAKE FACE AUTH
+NHAI DATALAKE 3.0
+06
+
+### Notes:
+
+<!-- Slide number: 8 -->
+INNOVATION
+A transparent, weighted Authentication Score
+
+### Chart
+
+| Category | Weights |
+|---|---|
+| Recognition | 45.0 |
+| Liveness | 25.0 |
+| Alertness | 10.0 |
+| Pose | 10.0 |
+| Lighting | 10.0 |
+Every signal becomes a 0-1 sub-score, multiplied by a weight, summed to a single score out of 100.
+Recognition (0.45) — match confidence from distance
+Liveness (0.25) — challenge passed
+Alertness (0.10) — not drowsy, eyes open
+Pose (0.10) — frontal head pose
+Lighting (0.10) — adequate illumination
+Scores below 70 are flagged low-trust for review. Identical weighting on native and web.
+DATALAKE FACE AUTH
+NHAI DATALAKE 3.0
+07
+
+### Notes:
+
+<!-- Slide number: 9 -->
+PERFORMANCE & FOOTPRINT
+Lightweight, sub-second, CPU-only
+
+10.7
+< 1s
+26
+0
+MB TOTAL MODELS
+RECOGNIZE + MATCH
+ANDROID MINSDK (8.0+)
+NETWORK CALLS IN AUTH
+
+### Chart
+
+| Category | MB |
+|---|---|
+| Our models | 10.7 |
+| 20 MB budget | 20.0 |
+Latency budget
+Detection + landmarks
+Embedding extraction
+Cosine match (~0 ms)
+Measured live, shown per verify
+DATALAKE FACE AUTH
+NHAI DATALAKE 3.0
+08
+
+### Notes:
+
+<!-- Slide number: 10 -->
+REQUIREMENT COMPLIANCE
+Every constraint, mapped to the build
+| Requirement | Status | Where |
+| --- | --- | --- |
+| React Native, Android + iOS | Met — Android APK builds; iOS project incl. | app/ |
+| Model ~20 MB | 10.7 MB TFLite | app/assets/models |
+| < 1s recognize + liveness | On-device latency budget | benchmark / stat strip |
+| Android 8.0+, no GPU, 3 GB RAM | minSdk 26, CPU TFLite | android/ |
+| > 95% acc, Indian demographics | Baseline + documented validation | alignment doc |
+| Open-source only | MIT / Apache-2.0 | repo |
+| Offline liveness (blink/smile/turn) | Passive + active | face/liveness |
+| Sync & purge (AWS) | Queue → POST → purge | sync / backend |
+DATALAKE FACE AUTH
+NHAI DATALAKE 3.0
+09
+
+### Notes:
+
+<!-- Slide number: 11 -->
+BEYOND THE BRIEF
+Bonus capabilities that stand out
+
+Composite trust score
+Drowsiness monitoring
+Bilingual prompts + voice
+
+Weighted 0-100 score across all signals
+PERCLOS, blink rate, micro-sleep, look-away
+Hindi or English, offline TTS, switchable
+
+Verifiable offline proof
+Latency budget
+Operations-ready records
+
+"0 network calls during auth" counter
+Per-verify ms breakdown, < 1s on-device
+Score, latency, fatigue and attack flags
+DATALAKE FACE AUTH
+NHAI DATALAKE 3.0
+10
+
+### Notes:
+
+<!-- Slide number: 12 -->
+BUILT WITH OPEN-SOURCE
+Tech stack
+
+Native app (Android / iOS)
+Browser demo (Vercel)
+Sync backend (AWS / Render)
+React Native 0.74
+react-native-vision-camera
+react-native-fast-tflite
+ML Kit face detection
+MMKV (encrypted store)
+react-native-tts (offline voice)
+Vite + React + TypeScript
+@vladmandic/face-api
+Web Speech API (offline TTS)
+Playwright E2E
+Node + Express
+PostgreSQL (optional) / in-memory
+Docker + App Runner config
+Server-rendered dashboard
+All components are MIT or Apache-2.0 — no additional licensing required.
+DATALAKE FACE AUTH
+NHAI DATALAKE 3.0
+11
+
+### Notes:
+
+<!-- Slide number: 13 -->
+TRY IT NOW
+Android APK first, web demo optional
+
+ANDROID APK
+Primary judge install. Fully offline native authentication with bundled models.
+
+![/Users/parth/nhai/docs/deck/assets/qr-github.png](Image0.jpg)
+Download universal APK
+
+BROWSER DEMO
+Open on a phone or laptop, allow the camera, enroll and verify.
+
+![/Users/parth/nhai/docs/deck/assets/qr-demo.png](Image1.jpg)
+nhai-three.vercel.app
+
+SOURCE CODE
+Native app, web demo and backend, with full documentation.
+
+![/Users/parth/nhai/docs/deck/assets/qr-github.png](Image2.jpg)
+github.com/perrysolid/NHAI
+DATALAKE FACE AUTH
+NHAI DATALAKE 3.0
+12
+
+### Notes:
+
+<!-- Slide number: 14 -->
+JUDGE PACKAGE
+Installable mobile build is packaged with the repo
+
+ANDROID APK
+iOS / IPA
+
+DOWNLOAD ANDROID APK
+iOS does not use APK files; judges need a signed IPA or TestFlight build
+React Native iOS project is included at app/ios/DatalakeFaceAuth.xcodeproj
+Build with Xcode after pod install, then archive with an Apple Team profile
+Offline auth code, storage flow and UI are shared from the same app source
+File: docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
+One universal APK for judge phones: arm64-v8a + armeabi-v7a
+Release variant, version 1.0, package com.datalakefaceauth
+Bundled TFLite + ML Kit assets verified inside the APK
+Gradle still emits smaller split APKs locally if architecture-specific installs are needed.
+We can archive iOS only when Apple signing credentials are available.
+
+README.md + docs/deliverables/README.md contain install commands, hashes, and platform notes.
+DATALAKE FACE AUTH
+NHAI DATALAKE 3.0
+13
+
+### Notes:
+
+<!-- Slide number: 15 -->
+
+HONEST ROADMAP
+Production-ready core, a clear path to scale
+Swap MobileFaceNet for INT8 EdgeFace-S to shrink the recognition model further
+Fine-tune on IndicFairFace for diverse Indian-demographic robustness
+On-device benchmarking across mid-range hardware to certify > 95% and < 1s
+Drop the FaceEngine into the existing Datalake 3.0 React Native screens
+Thank you
+nhai-three.vercel.app   ·   github.com/perrysolid/NHAI
+
+### Notes:

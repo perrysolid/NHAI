@@ -1,0 +1,7 @@
+node_modules/
+.venv/
+~$*.pptx
+qa/*.jpg
+qa/*.png
+qa/slides/
+qa/*.pdf

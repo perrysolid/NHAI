@@ -15,9 +15,9 @@
 ![License](https://img.shields.io/badge/Licenses-MIT_%2F_Apache--2.0-blue)
 
 **Primary deliverable:** a cross-platform **React Native app (Android + iOS)** that authenticates entirely offline.
-**Live browser demo (for demonstration only):**
+**Judge mobile package:** [**Download Android APK**](https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk) · [package notes](docs/deliverables/README.md)
 
-[**▶ Try the demo**](https://nhai-three.vercel.app) · [**Operations dashboard**](https://datalake-face-sync.onrender.com/admin) · [**Sync API status**](https://datalake-face-sync.onrender.com/health)
+**Optional browser demo:** [Try the demo](https://nhai-three.vercel.app)
 
 </div>
 
@@ -110,7 +110,7 @@ Weights live in `config.ts` (`SCORING`) and are identical on native and web (`ap
 - **Verifiable offline proof** — a live "Auth network: 0 calls" counter shows zero network requests during authentication.
 - **On-device latency budget** — recognize + match milliseconds shown per verification, proving the `<1 s` target.
 - **Presentation-attack KPI** — blocked liveness attempts counted on-device and on the dashboard.
-- **Operations console** — KPIs, authentication-score and match-distance charts, and an inspection ledger that highlights drowsy / look-away / poor-light / weak-match / attack rows.
+- **Operations-ready sync records** — verified records include score, latency, liveness, and inspection metrics for downstream analytics.
 
 ## Repository layout
 
@@ -120,6 +120,22 @@ Weights live in `config.ts` (`SCORING`) and are identical on native and web (`ap
 | [`web/`](web) | Browser **demo** of the same pipeline (Vercel) | Vite + React, @vladmandic/face-api, Web Speech API |
 | [`backend/`](backend) | Sync target + operations dashboard (AWS / Render) | Node + Express, optional Postgres |
 | [`docs/`](docs) | Plan, integration guide, methodology, deployment, alignment | — |
+
+## Judge mobile package
+
+Android release APKs are included in [`docs/deliverables/`](docs/deliverables). Judges can use the single universal APK directly:
+
+[**Download Android APK**](https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk)
+
+| Platform | File | Use |
+|----------|------|-----|
+| Android universal | [`DatalakeFaceAuth-android-universal-release.apk`](docs/deliverables/DatalakeFaceAuth-android-universal-release.apk) | One APK for judge phones: arm64-v8a + armeabi-v7a |
+
+```bash
+adb install -r docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
+```
+
+iOS does **not** use APK files. The iOS equivalent is a signed `.ipa` or TestFlight build. The project is included at [`app/ios/DatalakeFaceAuth.xcodeproj`](app/ios/DatalakeFaceAuth.xcodeproj); archive/export requires an Apple Developer Team, signing certificate, and provisioning profile.
 
 ## Models (on-device, < 20 MB)
 
@@ -163,7 +179,7 @@ The web app works standalone in "simulate sync" mode (no backend needed) and use
 ## Deploy
 
 - **Frontend → Vercel:** root dir `web`, framework Vite. Live: [nhai-three.vercel.app](https://nhai-three.vercel.app)
-- **Backend → Render:** one-click via [`render.yaml`](render.yaml). Live: [datalake-face-sync.onrender.com](https://datalake-face-sync.onrender.com)
+- **Backend → Render:** one-click via [`render.yaml`](render.yaml); the public admin route is passcode-protected.
 - **Backend → AWS:** App Runner / Elastic Beanstalk / ECS / EC2 via [`backend/Dockerfile`](backend/Dockerfile) + [`backend/apprunner.yaml`](backend/apprunner.yaml). See [`docs/AWS_DEPLOYMENT.md`](docs/AWS_DEPLOYMENT.md).
 - Full steps: [`docs/WEB_RENDER_DEPLOYMENT.md`](docs/WEB_RENDER_DEPLOYMENT.md).
 
@@ -171,7 +187,7 @@ The web app works standalone in "simulate sync" mode (no backend needed) and use
 
 | Package | Type-check | Lint | Tests | Build |
 |---------|-----------|------|-------|-------|
-| `app/` (native) | clean | clean | 28 unit tests pass | Android release APK builds (39 MB arm64 / 29 MB armv7) |
+| `app/` (native) | clean | clean | 28 unit tests pass | Android release APK builds (69 MB universal / 50 MB arm64 / 40 MB armv7) |
 | `web/` | clean | clean | 4 Playwright E2E pass | Vite production build |
 | `backend/` | clean | — | endpoint smoke (sync/records/dedupe) | `tsc` build |
 

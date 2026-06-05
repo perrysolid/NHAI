@@ -1,9 +1,9 @@
 /**
  * DatalakeFaceAuth — offline on-device face recognition + liveness.
  *
- * Phase 1: render the camera preview screen. Later phases add face detection,
- * the FaceEngine (EdgeFace + MiniFASNet), dual liveness, enroll/verify, and
- * offline→online sync. The auth path stays 100% offline.
+ * Judge demo: camera gates, bundled TFLite model loading, offline enrollment,
+ * dual liveness, local verification, encrypted queue, and sync→purge lifecycle.
+ * The auth decision stays 100% offline.
  *
  * @format
  */
