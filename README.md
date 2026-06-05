@@ -79,8 +79,11 @@ npm run dev
 ```
 
 The browser demo keeps face inference local in the browser and only syncs verified
-attendance records. Deployment steps are in
-[`docs/WEB_RENDER_DEPLOYMENT.md`](docs/WEB_RENDER_DEPLOYMENT.md).
+attendance records. Deployment steps:
+[`docs/AWS_DEPLOYMENT.md`](docs/AWS_DEPLOYMENT.md) (AWS App Runner / Elastic
+Beanstalk / ECS / EC2 + RDS — the spec's AWS sync target) and
+[`docs/WEB_RENDER_DEPLOYMENT.md`](docs/WEB_RENDER_DEPLOYMENT.md) (Vercel frontend
++ Render one-click alternative).
 
 > Native model note: the app now bundles MobileFaceNet + MiniFASNet `.tflite`
 > assets and a `react-native-fast-tflite` engine. Combined model assets are about

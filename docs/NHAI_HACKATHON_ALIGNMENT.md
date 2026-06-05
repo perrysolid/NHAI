@@ -40,10 +40,12 @@ further while preserving a strong compact-face-recognition baseline.
    is an older RN line (≈0.72) — a tradeoff to call out, not hide.
 2. **iOS build not produced here.** Only the Android release APK is verified
    (39 MB arm64 / 29 MB armv7). iOS needs macOS + Xcode + CocoaPods to build.
-3. **Sync target named "AWS" in the brief; we run it on Render.** `syncPending()`
-   posts to a standard HTTPS `/api/sync` endpoint, so the same backend deploys to
-   AWS (Elastic Beanstalk / Lambda+API Gateway / EC2) unchanged — only the URL
-   changes. Demo is on Render for speed; an AWS deploy is a config swap.
+3. **Sync target named "AWS" in the brief — now has a real AWS path.** The
+   backend ships a `Dockerfile` + `apprunner.yaml` and a `docs/AWS_DEPLOYMENT.md`
+   guide, so it deploys unchanged to **AWS App Runner / Elastic Beanstalk /
+   ECS-Fargate / EC2**, with **RDS Postgres** for persistence via `DATABASE_URL`.
+   Render remains a one-click alternative; the device just points `VITE_SYNC_URL`
+   at whichever host.
 4. **`>95%` accuracy + Indian-demographic robustness is not independently
    measured.** Bundled MobileFaceNet is a strong compact baseline but is not
    Indian-demographic fine-tuned; IndicFairFace fine-tuning is the documented
