@@ -48,3 +48,6 @@ docs/deck/.venv/
 docs/deck/node_modules/
 docs/deck/*.pdf
 docs/deck/qa-*.jpg
+
+# local submission package (large APK already lives in docs/deliverables)
+parth_submision/
