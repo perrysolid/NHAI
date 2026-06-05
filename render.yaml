@@ -1,0 +1,30 @@
+# Render Blueprint — one-click deploy of the DatalakeFaceAuth sync backend.
+# In the Render dashboard: New → Blueprint → point at this repo.
+# The backend runs with an in-memory store unless you add a DATABASE_URL
+# (uncomment the database block + the fromDatabase env var for persistence).
+services:
+  - type: web
+    name: datalake-face-sync
+    runtime: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: API_KEY
+        generateValue: true # shared secret; mirror into the frontend's VITE_SYNC_KEY
+      - key: ADMIN_PASSCODE
+        generateValue: true # /admin?key=...
+      - key: CORS_ORIGIN
+        sync: false # set to https://<your-vercel-app>.vercel.app
+      # For durable storage, create a Render Postgres and wire it here:
+      # - key: DATABASE_URL
+      #   fromDatabase:
+      #     name: datalake-face-db
+      #     property: connectionString
+
+# databases:
+#   - name: datalake-face-db
+#     plan: free

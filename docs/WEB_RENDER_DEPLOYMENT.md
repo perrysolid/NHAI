@@ -11,7 +11,13 @@ only verified attendance records after sync.
 
 ## 1. Deploy Backend On Render
 
-Create a Render Web Service from this repository.
+**Fastest:** use the included `render.yaml` Blueprint — in Render, choose
+**New → Blueprint** and point it at this repo. It provisions the web service,
+auto-generates `API_KEY` + `ADMIN_PASSCODE`, and only asks you to set
+`CORS_ORIGIN`. (Uncomment the database block in `render.yaml` for a persistent
+Postgres.)
+
+**Or manually:** create a Render Web Service from this repository.
 
 - Root Directory: `backend`
 - Build Command: `npm ci && npm run build`
