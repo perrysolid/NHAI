@@ -31,7 +31,12 @@ import {
   type InspectionMetrics,
 } from './lib/storage';
 import {syncPending} from './lib/syncClient';
-import {speak, setSpeechEnabled, isSpeechSupported} from './lib/speech';
+import {
+  speak,
+  setSpeechEnabled,
+  isSpeechSupported,
+  primeSpeech,
+} from './lib/speech';
 import {useCamera} from './ui/useCamera';
 import {useFaceLoop} from './ui/useFaceLoop';
 import CameraStage from './ui/CameraStage';
@@ -100,6 +105,17 @@ export default function App() {
     setSpeechEnabled(voice);
   }, [voice]);
 
+  // Toggling voice runs inside a click gesture, so it can unlock + confirm audio.
+  const toggleVoice = useCallback(() => {
+    const next = !voice;
+    setVoice(next);
+    setSpeechEnabled(next);
+    if (next) {
+      primeSpeech();
+      speak('Voice enabled / आवाज़ चालू');
+    }
+  }, [voice]);
+
   useEffect(() => {
     const on = () => setOnline(true);
     const off = () => setOnline(false);
@@ -142,6 +158,7 @@ export default function App() {
     enrollBufRef.current = [];
     setEnrollCount(0);
     setResult(null);
+    primeSpeech();
     netMonitor.beginAuth();
     setMode('enrolling');
     addLog(`Enrolling "${id}"`);
@@ -153,6 +170,7 @@ export default function App() {
       return;
     }
     setResult(null);
+    primeSpeech();
     const challenge = new LivenessChallenge();
     challenge.start(performance.now());
     livenessRef.current = challenge;
@@ -457,7 +475,7 @@ export default function App() {
           {isSpeechSupported() && (
             <button
               className={`voicebtn ${voice ? 'voicebtn--on' : ''}`}
-              onClick={() => setVoice(v => !v)}
+              onClick={toggleVoice}
               data-testid="voice"
               title="Toggle voice prompts">
               Voice {voice ? 'on' : 'off'}

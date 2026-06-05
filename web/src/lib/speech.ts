@@ -5,12 +5,29 @@
  *
  * Prompts are "English / हिन्दी" strings; we speak the English part as en-IN and
  * the Hindi part as hi-IN (falling back to the default voice if hi-IN is absent).
+ *
+ * Chrome only lets speechSynthesis play once it has been "unlocked" inside a
+ * real user gesture, so primeSpeech() must be called from a click/tap handler
+ * before prompts fired from the frame loop will be audible.
  */
 let enabled = false;
 let lastSpoken = '';
+let unlocked = false;
 
 export function isSpeechSupported(): boolean {
   return typeof window !== 'undefined' && 'speechSynthesis' in window;
+}
+
+// Warm the voices list (it is async on first load).
+if (isSpeechSupported()) {
+  try {
+    window.speechSynthesis.getVoices();
+    window.speechSynthesis.addEventListener?.('voiceschanged', () => {
+      window.speechSynthesis.getVoices();
+    });
+  } catch {
+    /* ignore */
+  }
 }
 
 export function setSpeechEnabled(on: boolean): void {
@@ -25,12 +42,31 @@ export function isSpeechEnabled(): boolean {
   return enabled;
 }
 
+/** Call from a click/tap handler to unlock audio so later prompts are audible. */
+export function primeSpeech(): void {
+  if (!isSpeechSupported()) {
+    return;
+  }
+  try {
+    const synth = window.speechSynthesis;
+    synth.resume();
+    if (!unlocked) {
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      synth.speak(u);
+      unlocked = true;
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function voiceForLang(lang: string): SpeechSynthesisVoice | undefined {
   const voices = window.speechSynthesis.getVoices();
   const base = lang.split('-')[0];
   return (
     voices.find(v => v.lang === lang) ||
-    voices.find(v => v.lang.startsWith(base))
+    voices.find(v => v.lang.replace('_', '-').startsWith(base))
   );
 }
 
@@ -45,6 +81,7 @@ export function speak(text: string): void {
   lastSpoken = text;
   const synth = window.speechSynthesis;
   synth.cancel();
+  synth.resume();
 
   const parts = text
     .split('/')
@@ -58,8 +95,9 @@ export function speak(text: string): void {
     if (v) {
       u.voice = v;
     }
-    u.rate = 1;
+    u.rate = 0.98;
     u.pitch = 1;
+    u.volume = 1;
     synth.speak(u);
   });
 }
