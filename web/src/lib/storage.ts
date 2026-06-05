@@ -17,6 +17,24 @@ export interface Enrollment {
   samples: number;
 }
 
+/** Per-event frame-inspection snapshot captured at the moment of verification. */
+export interface InspectionMetrics {
+  /** eye aspect ratio at capture. */
+  ear: number;
+  /** PERCLOS over the session window (0..1). */
+  perclos: number;
+  /** blinks per minute. */
+  blinkRate: number;
+  /** fatigue flag derived from PERCLOS / micro-sleep. */
+  drowsy: boolean;
+  /** head turned away past threshold. */
+  lookingAway: boolean;
+  yawDeg: number;
+  pitchDeg: number;
+  /** mean frame luma 0..255. */
+  brightness: number;
+}
+
 export interface AttendanceRecord {
   userId: string;
   timestamp: number;
@@ -24,6 +42,7 @@ export interface AttendanceRecord {
   matchDistance: number;
   deviceId: string;
   synced: boolean;
+  inspection?: InspectionMetrics;
 }
 
 function read<T>(key: string, fallback: T): T {

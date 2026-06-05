@@ -1,6 +1,6 @@
 :root {
-  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
-  line-height: 1.45;
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  line-height: 1.5;
   color-scheme: dark;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -18,5 +18,22 @@ body,
 }
 
 body {
-  background: #0b0f15;
+  background: #07090b;
+  color: #dbe4e8;
+}
+
+::selection {
+  background: rgba(56, 224, 165, 0.3);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #25323b;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
 }

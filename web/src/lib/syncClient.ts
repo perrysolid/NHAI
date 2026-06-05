@@ -1,5 +1,5 @@
 /**
- * syncClient — offline→online sync to the Render backend, then purge locally.
+ * syncClient — offline->online sync to the Render backend, then purge locally.
  *
  * The auth flow never depends on this; it runs only when the user triggers a
  * sync (or on reconnect). MOCK_SYNC simulates a 200 so the demo works with no

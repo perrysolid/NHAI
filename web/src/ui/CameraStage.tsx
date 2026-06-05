@@ -1,6 +1,9 @@
 /**
- * CameraStage — the live video with a readiness ring and a prompt banner.
- * Presentational only; all decisions come from the parent.
+ * CameraStage — biometric capture viewport with a HUD reticle.
+ *
+ * Corner brackets frame the subject, a scan line sweeps while the sensor is
+ * active, and status reads out in monospace. Green denotes capture-ready / lock.
+ * Presentational only; the parent supplies state.
  */
 import type {RefObject} from 'react';
 
@@ -8,9 +11,11 @@ export interface CameraStageProps {
   videoRef: RefObject<HTMLVideoElement | null>;
   ready: boolean;
   prompt: string;
-  /** optional liveness progress 0..1 to draw a ring sweep. */
+  /** liveness progress 0..1 -> drives the top sweep bar. */
   progress?: number;
-  badge?: string;
+  /** short state label shown top-right (e.g. ready / verifying). */
+  status: string;
+  active: boolean;
 }
 
 export default function CameraStage({
@@ -18,10 +23,11 @@ export default function CameraStage({
   ready,
   prompt,
   progress,
-  badge,
+  status,
+  active,
 }: CameraStageProps) {
   return (
-    <div className="stage">
+    <div className={`stage ${ready ? 'stage--lock' : ''}`}>
       <video
         ref={videoRef}
         className="video"
@@ -30,18 +36,36 @@ export default function CameraStage({
         autoPlay
         data-testid="camera-video"
       />
-      <div className="ring-wrap" aria-hidden>
-        <div className={`ring ${ready ? 'ring--ready' : ''}`} />
+
+      <div className="hud" aria-hidden>
+        <span className="corner corner--tl" />
+        <span className="corner corner--tr" />
+        <span className="corner corner--bl" />
+        <span className="corner corner--br" />
+        <div className="reticle" />
+        {active && <div className="scanline" />}
       </div>
+
+      <div className="hud-top">
+        <div className="sysind">
+          <span className="led" />
+          <span>SENSOR LIVE</span>
+        </div>
+        <div className="statechip" data-testid="state">
+          {status.toUpperCase()}
+        </div>
+      </div>
+
       {typeof progress === 'number' && progress > 0 && (
-        <div className="progress" data-testid="liveness-progress">
-          <div className="progress__bar" style={{width: `${progress * 100}%`}} />
+        <div className="livebar" data-testid="liveness-progress">
+          <div className="livebar__fill" style={{width: `${progress * 100}%`}} />
         </div>
       )}
-      {badge && <div className="badge">{badge}</div>}
+
       <div
-        className={`prompt ${ready ? 'prompt--ready' : ''}`}
+        className={`readout ${ready ? 'readout--lock' : ''}`}
         data-testid="prompt">
+        <span className="readout__caret">›</span>
         {prompt}
       </div>
     </div>

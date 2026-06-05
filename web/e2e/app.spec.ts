@@ -17,8 +17,8 @@ test('loads, initializes models, and renders the UI without errors', async ({
   page.on('pageerror', e => errors.push(e.message));
 
   await page.goto('/');
-  await expect(page).toHaveTitle(/DatalakeFaceAuth/);
-  await expect(page.getByText('DatalakeFaceAuth').first()).toBeVisible();
+  await expect(page).toHaveTitle(/Datalake Face Auth/);
+  await expect(page.getByText('Datalake Face Auth').first()).toBeVisible();
   await expect(page.getByTestId('camera-video')).toBeVisible();
 
   // Proves the ~7MB face-api models are served and load in-browser.
@@ -35,7 +35,7 @@ test('enroll requires a user id', async ({page}) => {
     timeout: 60_000,
   });
   await page.getByTestId('enroll').click();
-  await expect(page.getByTestId('log')).toContainText('Enter a user ID');
+  await expect(page.getByTestId('log')).toContainText('requires a user ID');
 });
 
 test('verify requires an enrollment', async ({page}) => {
@@ -68,13 +68,13 @@ test('sync uploads the pending queue then purges it locally', async ({
   });
 
   await page.goto('/');
-  await expect(page.getByText('Pending queue (1)')).toBeVisible();
   await expect(page.getByText('inspector_01')).toBeVisible();
 
   // mock sync is on by default → simulates a 200 then purges.
   await page.getByTestId('sync').click();
 
-  await expect(page.getByText('Pending queue (0)')).toBeVisible();
-  await expect(page.getByText('empty — all synced')).toBeVisible();
+  await expect(
+    page.getByText('Queue empty — all records synced'),
+  ).toBeVisible();
   await expect(page.getByTestId('log')).toContainText('purged');
 });

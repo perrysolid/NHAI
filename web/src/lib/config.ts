@@ -39,7 +39,7 @@ export const GATES = {
 export const LIVENESS = {
   /** face-api 'happy' expression probability for a smile. */
   smileProb: 0.7,
-  /** Eye Aspect Ratio: below = closed, above = open (blink = closed→open). */
+  /** Eye Aspect Ratio: below = closed, above = open (blink = closed->open). */
   earClosed: 0.21,
   earOpen: 0.28,
   /** yaw delta (deg) to count a head turn. */
@@ -48,6 +48,22 @@ export const LIVENESS = {
   timeoutMs: 7000,
   /** how many distinct challenges to require (randomized). */
   challengeCount: 2,
+} as const;
+
+// ── Drowsiness / attention monitoring (eye-landmark based) ──
+export const DROWSINESS = {
+  /** EAR below this = eyes considered closed for PERCLOS/blink. */
+  earClosed: 0.21,
+  /** rolling window (ms) over which PERCLOS and blink rate are computed. */
+  windowMs: 15000,
+  /** PERCLOS (fraction of window with eyes closed) at/above this = drowsy. */
+  perclosDrowsy: 0.2,
+  /** a single continuous eye closure this long (ms) = drowsy (micro-sleep). */
+  sustainedClosureMs: 1100,
+  /** |yaw| beyond this (deg) = subject looking away / inattentive. */
+  lookAwayYawDeg: 26,
+  /** blinks per minute above this = elevated (fatigue indicator). */
+  highBlinkRate: 28,
 } as const;
 
 // ── Sync target (Render backend). Override via VITE_SYNC_URL at build time. ──
@@ -59,5 +75,5 @@ export const SYNC = {
   apiKey: (import.meta.env?.VITE_SYNC_KEY as string | undefined) ?? 'CHANGE_ME',
 } as const;
 
-export const config = {FLAGS, RECOGNITION, GATES, LIVENESS, SYNC};
+export const config = {FLAGS, RECOGNITION, GATES, LIVENESS, DROWSINESS, SYNC};
 export default config;

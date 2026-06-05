@@ -11,10 +11,11 @@ import type {FaceSignals} from './pipeline';
 export type ChallengeKind = 'blink' | 'smile' | 'turn';
 export type LivenessStatus = 'idle' | 'running' | 'passed' | 'failed';
 
+// Short bilingual prompts (English / हिन्दी). Static, offline-safe.
 const PROMPTS: Record<ChallengeKind, string> = {
-  blink: 'Blink your eyes',
-  smile: 'Smile 🙂',
-  turn: 'Turn your head left or right',
+  blink: 'Blink / पलक झपकाएँ',
+  smile: 'Smile / मुस्कुराएँ',
+  turn: 'Turn your head / सिर घुमाएँ',
 };
 
 export interface LivenessSnapshot {
@@ -115,9 +116,9 @@ export class LivenessChallenge {
     if (this.status === 'running') {
       prompt = PROMPTS[this.current()];
     } else if (this.status === 'passed') {
-      prompt = 'Liveness confirmed ✓';
+      prompt = 'Liveness confirmed / सत्यापित';
     } else if (this.status === 'failed') {
-      prompt = 'Liveness failed — try again';
+      prompt = 'Liveness failed / विफल — पुनः प्रयास';
     }
     return {
       status: this.status,

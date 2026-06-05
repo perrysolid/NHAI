@@ -1,10 +1,10 @@
 /**
- * DatalakeFaceAuth — web demo (Vercel frontend).
+ * Datalake Face Auth — web console (Vercel frontend).
  *
- * In-browser face authentication: enroll → liveness challenge → recognition,
- * then sync attendance to the Render backend and purge the local queue. All
- * face inference runs client-side (@vladmandic/face-api); nothing is uploaded
- * except the verified attendance record on sync.
+ * In-browser facial authentication: enroll -> liveness challenge -> recognition,
+ * then sync the verified attendance record to the backend and purge the local
+ * queue. All face inference runs client-side (@vladmandic/face-api); no image
+ * ever leaves the device — only the verified record is sent on sync.
  */
 import {useCallback, useEffect, useRef, useState} from 'react';
 import './App.css';
@@ -22,14 +22,22 @@ import {
   saveEnrollment,
   type AttendanceRecord,
   type Enrollment,
+  type InspectionMetrics,
 } from './lib/storage';
 import {syncPending} from './lib/syncClient';
 import {useCamera} from './ui/useCamera';
 import {useFaceLoop} from './ui/useFaceLoop';
 import CameraStage from './ui/CameraStage';
+import StatStrip from './ui/StatStrip';
+import InspectionPanel from './ui/InspectionPanel';
 
 type Mode = 'idle' | 'enrolling' | 'verifying';
 type ModelState = 'loading' | 'ready' | 'error';
+interface Verdict {
+  ok: boolean;
+  label: string;
+  detail?: string;
+}
 
 const CAPTURE_THROTTLE_MS = 350;
 
@@ -37,30 +45,28 @@ export default function App() {
   const [modelState, setModelState] = useState<ModelState>('loading');
   const [mode, setMode] = useState<Mode>('idle');
   const [userId, setUserId] = useState('');
-  const [prompt, setPrompt] = useState('Loading models…');
+  const [prompt, setPrompt] = useState('Initializing models');
   const [enrollCount, setEnrollCount] = useState(0);
   const [liveness, setLiveness] = useState<LivenessSnapshot | null>(null);
-  const [result, setResult] = useState<{ok: boolean; text: string} | null>(
-    null,
-  );
+  const [result, setResult] = useState<Verdict | null>(null);
   const [log, setLog] = useState<string[]>([]);
-  const [enrollments, setEnrollments] =
-    useState<Enrollment[]>(getEnrollments);
+  const [enrollments, setEnrollments] = useState<Enrollment[]>(getEnrollments);
   const [queue, setQueue] = useState<AttendanceRecord[]>(getQueue);
   const [mockSync, setMockSync] = useState<boolean>(FLAGS.MOCK_SYNC);
+  const [online, setOnline] = useState<boolean>(navigator.onLine);
 
   const {videoRef, status: camStatus, start} = useCamera();
   const enabled = modelState === 'ready' && camStatus === 'ready';
-  const {frame, latest} = useFaceLoop(videoRef, enabled);
+  const {frame, latest, metrics} = useFaceLoop(videoRef, enabled);
 
-  // Flow refs hold capture-only state that should not trigger re-renders.
   const enrollBufRef = useRef<Float32Array[]>([]);
   const livenessRef = useRef<LivenessChallenge | null>(null);
   const busyRef = useRef(false);
   const lastCaptureRef = useRef(0);
 
   const addLog = useCallback((m: string) => {
-    setLog(l => [`${new Date().toLocaleTimeString()}  ${m}`, ...l].slice(0, 30));
+    const ts = new Date().toLocaleTimeString('en-GB', {hour12: false});
+    setLog(l => [`${ts}  ${m}`, ...l].slice(0, 40));
   }, []);
 
   const refreshData = useCallback(() => {
@@ -68,7 +74,17 @@ export default function App() {
     setQueue(getQueue());
   }, []);
 
-  // Load models + start camera once.
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => {
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     loadModels()
@@ -77,8 +93,8 @@ export default function App() {
           return;
         }
         setModelState('ready');
-        setPrompt('Position your face');
-        addLog('Models loaded');
+        setPrompt('Position your face within the frame');
+        addLog('Models loaded · sensor pipeline ready');
         void start();
       })
       .catch((e: unknown) => {
@@ -94,19 +110,19 @@ export default function App() {
   const startEnroll = useCallback(() => {
     const id = userId.trim();
     if (!id) {
-      addLog('Enter a user ID to enroll');
+      addLog('Enrollment requires a user ID');
       return;
     }
     enrollBufRef.current = [];
     setEnrollCount(0);
     setResult(null);
     setMode('enrolling');
-    addLog(`Enrolling "${id}"…`);
+    addLog(`Enrolling "${id}"`);
   }, [userId, addLog]);
 
   const startVerify = useCallback(() => {
     if (getEnrollments().length === 0) {
-      addLog('No enrolled users yet — enroll first');
+      addLog('No enrolled users — enroll a subject first');
       return;
     }
     setResult(null);
@@ -115,7 +131,7 @@ export default function App() {
     livenessRef.current = challenge;
     setLiveness(challenge.snapshot(performance.now()));
     setMode('verifying');
-    addLog('Verifying — complete the liveness challenge');
+    addLog('Verification started · awaiting liveness challenge');
   }, [addLog]);
 
   const finishEnroll = useCallback(
@@ -129,8 +145,8 @@ export default function App() {
       });
       enrollBufRef.current = [];
       setMode('idle');
-      setResult({ok: true, text: `Enrolled "${id}"`});
-      addLog(`Enrolled "${id}" (${RECOGNITION.enrollSamples} samples)`);
+      setResult({ok: true, label: 'Enrolled', detail: id});
+      addLog(`Enrolled "${id}" · ${RECOGNITION.enrollSamples} samples averaged`);
       refreshData();
     },
     [addLog, refreshData],
@@ -140,7 +156,7 @@ export default function App() {
     async (video: HTMLVideoElement) => {
       const probe = await computeDescriptor(video);
       if (!probe) {
-        setResult({ok: false, text: 'No face at capture — try again'});
+        setResult({ok: false, label: 'No face', detail: 'capture again'});
         setMode('idle');
         return;
       }
@@ -153,6 +169,20 @@ export default function App() {
       }
       const matched = best && best.distance < RECOGNITION.matchDistance;
       if (matched && best) {
+        const fs = latest.current;
+        const att = fs?.attention;
+        const prim = fs?.observation.primary;
+        const round = (n: number, d = 3) => Number(n.toFixed(d));
+        const inspection: InspectionMetrics = {
+          ear: round(att?.ear ?? 0),
+          perclos: round(att?.perclos ?? 0),
+          blinkRate: round(att?.blinkRate ?? 0, 1),
+          drowsy: att?.drowsy ?? false,
+          lookingAway: att?.lookingAway ?? false,
+          yawDeg: round(prim?.yawDeg ?? 0, 1),
+          pitchDeg: round(prim?.pitchDeg ?? 0, 1),
+          brightness: round(fs?.brightness ?? 0, 0),
+        };
         const record: AttendanceRecord = {
           userId: best.id,
           timestamp: Date.now(),
@@ -160,24 +190,31 @@ export default function App() {
           matchDistance: Number(best.distance.toFixed(4)),
           deviceId: getDeviceId(),
           synced: false,
+          inspection,
         };
         enqueueRecord(record);
         setResult({
           ok: true,
-          text: `✓ ${best.id} verified (distance ${best.distance.toFixed(3)})`,
+          label: 'Match',
+          detail: `${best.id} · distance ${best.distance.toFixed(3)}`,
         });
-        addLog(`Verified "${best.id}" — queued attendance`);
+        addLog(
+          `Match "${best.id}" · dist ${best.distance.toFixed(3)} · ${
+            inspection.drowsy ? 'DROWSY' : 'alert'
+          } · queued`,
+        );
       } else {
         setResult({
           ok: false,
-          text: `✗ No match${best ? ` (closest ${best.distance.toFixed(3)})` : ''}`,
+          label: 'No match',
+          detail: best ? `closest ${best.distance.toFixed(3)}` : undefined,
         });
         addLog('No matching enrollment');
       }
       setMode('idle');
       refreshData();
     },
-    [addLog, refreshData],
+    [addLog, refreshData, latest],
   );
 
   const step = useCallback(async () => {
@@ -207,7 +244,7 @@ export default function App() {
           lastCaptureRef.current = now;
           const n = enrollBufRef.current.length;
           setEnrollCount(n);
-          setPrompt(`Capturing ${n}/${RECOGNITION.enrollSamples}`);
+          setPrompt(`Capturing sample ${n} of ${RECOGNITION.enrollSamples}`);
           if (n >= RECOGNITION.enrollSamples) {
             finishEnroll(userId.trim());
           }
@@ -236,8 +273,8 @@ export default function App() {
           setLiveness(null);
         }
       } else if (snap.status === 'failed') {
-        setResult({ok: false, text: 'Liveness failed — try again'});
-        addLog('Liveness failed');
+        setResult({ok: false, label: 'Liveness failed', detail: 'retry'});
+        addLog('Liveness challenge failed · spoof rejected');
         setMode('idle');
         livenessRef.current = null;
         setLiveness(null);
@@ -245,7 +282,6 @@ export default function App() {
     }
   }, [videoRef, latest, mode, userId, finishEnroll, finishVerify, addLog]);
 
-  // Drive enroll/verify off a steady tick reading the freshest frame.
   useEffect(() => {
     if (mode === 'idle') {
       return;
@@ -261,10 +297,10 @@ export default function App() {
     if (out.ok) {
       addLog(
         out.accepted === 0
-          ? 'Nothing to sync'
-          : `Synced ${out.accepted} record(s)${
-              out.mocked ? ' (mock)' : ''
-            } → purged`,
+          ? 'Sync: nothing pending'
+          : `Sync: ${out.accepted} record(s) accepted${
+              out.mocked ? ' (simulated)' : ''
+            } · local queue purged`,
       );
     } else {
       addLog(`Sync failed: ${out.error}`);
@@ -273,63 +309,87 @@ export default function App() {
   }, [mockSync, addLog, refreshData]);
 
   const busy = mode !== 'idle';
-  const ringReady =
+  const ready =
     mode === 'idle'
       ? !!frame?.gate.ready
       : mode === 'verifying'
-      ? liveness?.status === 'passed'
-      : true;
+        ? liveness?.status === 'passed'
+        : true;
   const displayPrompt = mode === 'idle' && frame ? frame.gate.guidance : prompt;
 
-  let badge = 'ready';
+  let status: string;
   if (modelState === 'loading') {
-    badge = 'loading models…';
+    status = 'init';
   } else if (modelState === 'error') {
-    badge = 'model error';
+    status = 'fault';
   } else if (camStatus !== 'ready') {
-    badge = 'starting camera…';
+    status = 'camera';
   } else if (mode !== 'idle') {
-    badge = mode;
+    status = mode;
+  } else {
+    status = ready ? 'locked' : 'standby';
   }
 
   return (
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="dot" /> DatalakeFaceAuth
-          <span className="tag">offline-first · on-device</span>
+          <span className="brand__mark" aria-hidden>
+            <span />
+            <span />
+            <span />
+          </span>
+          <div>
+            <div className="brand__name">Datalake Face Auth</div>
+            <div className="brand__sub">Offline biometric authentication</div>
+          </div>
         </div>
-        <a
-          className="adminlink"
-          href="https://github.com/perrysolid/NHAI"
-          target="_blank"
-          rel="noreferrer">
-          NHAI Datalake 3.0
-        </a>
+        <div className="sysmeta">
+          <span className={`netchip ${online ? 'netchip--on' : 'netchip--off'}`}>
+            <span className="netchip__dot" />
+            Network {online ? 'online' : 'offline'}
+          </span>
+          <span className="sysmeta__id">NHAI · Datalake 3.0</span>
+        </div>
       </header>
+
+      <div className="mission">
+        <span className="mission__eyebrow">Mission</span>
+        <p className="mission__text">
+          Secure offline facial recognition and liveness detection to
+          authenticate field personnel on standard mid-range mobile devices in
+          zero-network zones — lightweight, on-device, and privacy-preserving.
+        </p>
+      </div>
+
+      <StatStrip detectMs={metrics.detectMs} fps={metrics.fps} />
 
       <main className="layout">
         <section className="left">
           <CameraStage
             videoRef={videoRef}
-            ready={ringReady}
+            ready={ready}
             prompt={displayPrompt}
             progress={mode === 'verifying' ? liveness?.progress : undefined}
-            badge={badge}
+            status={status}
+            active={enabled}
           />
 
           {result && (
             <div
-              className={`result ${result.ok ? 'ok' : 'bad'}`}
+              className={`verdict ${result.ok ? 'verdict--ok' : 'verdict--bad'}`}
               data-testid="result">
-              {result.text}
+              <span className="verdict__tag">{result.label}</span>
+              {result.detail && (
+                <span className="verdict__detail">{result.detail}</span>
+              )}
             </div>
           )}
 
           <div className="controls">
             <input
               className="input"
-              placeholder="user id (e.g. inspector_01)"
+              placeholder="Subject ID — e.g. inspector_01"
               value={userId}
               onChange={e => setUserId(e.target.value)}
               disabled={busy}
@@ -340,9 +400,9 @@ export default function App() {
               onClick={startEnroll}
               disabled={busy || modelState !== 'ready'}
               data-testid="enroll">
-              Enroll{' '}
+              Enroll
               {mode === 'enrolling'
-                ? `(${enrollCount}/${RECOGNITION.enrollSamples})`
+                ? ` · ${enrollCount}/${RECOGNITION.enrollSamples}`
                 : ''}
             </button>
             <button
@@ -356,7 +416,9 @@ export default function App() {
         </section>
 
         <aside className="right">
-          <Panel title={`Pending queue (${queue.length})`}>
+          <InspectionPanel frame={frame} />
+
+          <Panel title="Pending queue" count={queue.length}>
             <div className="syncrow">
               <label className="check">
                 <input
@@ -364,66 +426,86 @@ export default function App() {
                   checked={mockSync}
                   onChange={e => setMockSync(e.target.checked)}
                 />
-                mock sync
+                Simulate sync
               </label>
               <button
-                className="btn btn--sm"
+                className="btn btn--sm btn--primary"
                 onClick={onSync}
                 data-testid="sync">
                 Sync &amp; purge
               </button>
             </div>
             {queue.length === 0 ? (
-              <p className="muted">empty — all synced</p>
+              <p className="muted">Queue empty — all records synced</p>
             ) : (
               <ul className="list">
                 {queue.map((r, i) => (
                   <li key={i}>
-                    <b>{r.userId}</b> · d{r.matchDistance} ·{' '}
-                    {new Date(r.timestamp).toLocaleTimeString()}
+                    <span className="list__id">{r.userId}</span>
+                    <span className="list__meta">
+                      dist {r.matchDistance} ·{' '}
+                      {new Date(r.timestamp).toLocaleTimeString('en-GB', {
+                        hour12: false,
+                      })}
+                    </span>
                   </li>
                 ))}
               </ul>
             )}
           </Panel>
 
-          <Panel title={`Enrolled (${enrollments.length})`}>
+          <Panel title="Enrolled subjects" count={enrollments.length}>
             {enrollments.length === 0 ? (
-              <p className="muted">no users enrolled</p>
+              <p className="muted">No subjects enrolled</p>
             ) : (
               <ul className="list">
                 {enrollments.map(e => (
                   <li key={e.userId}>
-                    <b>{e.userId}</b> · {e.samples} samples
+                    <span className="list__id">{e.userId}</span>
+                    <span className="list__meta">{e.samples} samples</span>
                   </li>
                 ))}
               </ul>
             )}
           </Panel>
 
-          <Panel title="Activity">
+          <Panel title="Activity log">
             <ul className="loglist" data-testid="log">
-              {log.map((l, i) => (
-                <li key={i}>{l}</li>
-              ))}
+              {log.length === 0 ? (
+                <li className="muted">awaiting events</li>
+              ) : (
+                log.map((l, i) => <li key={i}>{l}</li>)
+              )}
             </ul>
           </Panel>
         </aside>
       </main>
+
+      <footer className="footer">
+        <span>On-device inference · no image leaves the browser</span>
+        <span>Open-source · @vladmandic/face-api · MIT</span>
+      </footer>
     </div>
   );
 }
 
 function Panel({
   title,
+  count,
   children,
 }: {
   title: string;
+  count?: number;
   children: React.ReactNode;
 }) {
   return (
     <div className="panel">
-      <div className="panel__title">{title}</div>
+      <div className="panel__title">
+        <span>{title}</span>
+        {typeof count === 'number' && (
+          <span className="panel__count">{count}</span>
+        )}
+      </div>
       <div className="panel__body">{children}</div>
     </div>
   );
