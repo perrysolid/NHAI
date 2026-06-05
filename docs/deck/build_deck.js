@@ -23,6 +23,7 @@ const BODY = 'Calibri';
 const W = 13.333;
 const H = 7.5;
 const APK_URL = 'https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk';
+const DEMO_VIDEO_URL = 'https://drive.google.com/drive/folders/14rTxUjJ_Wrdt349yWkksgE51m87zO97d?usp=sharing';
 
 const pres = new pptxgen();
 pres.defineLayout({name: 'WIDE', width: W, height: H});
@@ -288,12 +289,26 @@ function scannerPhone(s, x, y, w, h) {
   }
   s.addText(
     [
-      {text: 'Android APK  ', options: {color: C.faint, fontFace: HEAD, fontSize: 9.5}},
+      {text: 'Offline APK  ', options: {color: C.faint, fontFace: HEAD, fontSize: 9.5}},
       {text: APK_URL, options: {color: C.green, fontFace: HEAD, fontSize: 8.3, hyperlink: {url: APK_URL}}},
     ],
     {x: 0.95, y: 6.15, w: 11.9, h: 0.28, margin: 0},
   );
-  s.addText('Judge flow: open APK -> choose Verify or Enroll -> local face template -> local verification', {x: 0.95, y: 6.55, w: 10.8, h: 0.32, fontFace: HEAD, fontSize: 10.5, color: C.dim, margin: 0});
+  s.addText(
+    [
+      {text: 'Browser demo (Vercel)  ', options: {color: C.faint, fontFace: HEAD, fontSize: 9.5}},
+      {text: 'nhai-three.vercel.app', options: {color: C.green, fontFace: HEAD, fontSize: 9.5, hyperlink: {url: 'https://nhai-three.vercel.app'}}},
+      {text: '   —   offline Android APK is the deliverable; the web app is for demonstration only', options: {color: C.faint, fontFace: HEAD, fontSize: 9.5}},
+    ],
+    {x: 0.95, y: 6.45, w: 11.9, h: 0.3, margin: 0},
+  );
+  s.addText(
+    [
+      {text: 'Demo video  ', options: {color: C.faint, fontFace: HEAD, fontSize: 9.5}},
+      {text: 'drive.google.com/drive/folders/14rTxUjJ...', options: {color: C.green, fontFace: HEAD, fontSize: 9.5, hyperlink: {url: DEMO_VIDEO_URL}}},
+    ],
+    {x: 0.95, y: 6.8, w: 11.9, h: 0.3, margin: 0},
+  );
 })();
 
 // ───────────────────────── 2. PROBLEM ─────────────────────────
@@ -632,23 +647,23 @@ function scannerPhone(s, x, y, w, h) {
 (() => {
   const s = slide();
   eyebrow(s, 'Try it now', 0.6, 0.55);
-  title(s, 'Android APK for judge install', 0.6, 0.95, 12);
+  title(s, 'Install the offline APK, or try it in a browser', 0.6, 0.95, 12);
   const links = [
-    ['ANDROID APK', APK_URL, APK_URL, 'Primary judge install. Fully offline native authentication with bundled models.', 'qr-github.png'],
-    ['PACKAGE NOTES', 'docs/deliverables/README.md', 'https://github.com/perrysolid/NHAI/blob/main/docs/deliverables/README.md', 'Install command, APK hashes, Android target and iOS packaging notes.', 'qr-github.png'],
-    ['SOURCE CODE', 'github.com/perrysolid/NHAI', 'https://github.com/perrysolid/NHAI', 'Native app, backend and full documentation.', 'qr-github.png'],
+    ['ANDROID APK  ·  DELIVERABLE', APK_URL, APK_URL, 'The spec deliverable: fully offline native authentication with bundled models. Installs on any Android 8+ phone.', 'qr-github.png'],
+    ['BROWSER DEMO  ·  VERCEL', 'nhai-three.vercel.app', 'https://nhai-three.vercel.app', 'For demonstration only: the same enroll / liveness / verify pipeline in the browser, so judges can try it instantly with no install.', 'qr-demo.png'],
+    ['OPS DASHBOARD  ·  RENDER', 'datalake-face-sync.onrender.com/admin', 'https://datalake-face-sync.onrender.com/admin', 'Synced attendance with authentication-score and drowsiness analytics.', 'qr-dashboard.png'],
   ];
   let y = 2.2;
   for (const [k, label, url, desc, qr] of links) {
     card(s, 0.6, y, 12.1, 1.32);
     s.addText(k, {x: 0.9, y: y + 0.2, w: 3, h: 0.4, fontFace: HEAD, fontSize: 12, color: C.green, bold: true, charSpacing: 1, margin: 0});
     s.addText(
-      [{text: label, options: {hyperlink: {url}, color: C.text, fontFace: HEAD, fontSize: k === 'ANDROID APK' ? 7.2 : 15, bold: true}}],
-      {x: 0.9, y: y + 0.58, w: k === 'ANDROID APK' ? 10.25 : 5.15, h: 0.5, margin: 0},
+      [{text: label, options: {hyperlink: {url}, color: C.text, fontFace: HEAD, fontSize: label === APK_URL ? 7.2 : 15, bold: true}}],
+      {x: 0.9, y: y + 0.58, w: label === APK_URL ? 10.25 : 5.15, h: 0.5, margin: 0},
     );
     s.addText(
       desc,
-      k === 'ANDROID APK'
+      label === APK_URL
         ? {x: 0.9, y: y + 1.03, w: 10.1, h: 0.24, fontFace: BODY, fontSize: 9.5, color: C.dim, margin: 0}
         : {x: 5.75, y: y + 0.22, w: 5.45, h: 0.9, fontFace: BODY, fontSize: 12.5, color: C.dim, margin: 0, valign: 'middle'},
     );
@@ -656,6 +671,13 @@ function scannerPhone(s, x, y, w, h) {
     s.addImage({path: asset(qr), x: 11.48, y: y + 0.24, w: 0.82, h: 0.82});
     y += 1.5;
   }
+  s.addText(
+    [
+      {text: 'DEMO VIDEO   ', options: {color: C.green, fontFace: HEAD, fontSize: 12, bold: true, charSpacing: 1}},
+      {text: 'drive.google.com/drive/folders/14rTxUjJ_Wrdt349yWkksgE51m87zO97d', options: {color: C.text, fontFace: HEAD, fontSize: 11, hyperlink: {url: DEMO_VIDEO_URL}}},
+    ],
+    {x: 0.9, y: 6.6, w: 11.5, h: 0.3, margin: 0, valign: 'middle'},
+  );
   footer(s);
 })();
 

@@ -42,3 +42,9 @@ DerivedData/
 *.log
 .vscode/
 .idea/
+
+# deck build artifacts
+docs/deck/.venv/
+docs/deck/node_modules/
+docs/deck/*.pdf
+docs/deck/qa-*.jpg
