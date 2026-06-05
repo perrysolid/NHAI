@@ -42,7 +42,14 @@ import {meanLuma} from '../camera/frameUtils';
 import type {Face, FaceBounds, GateResult} from '../camera/types';
 import {OfflineAuthStore} from '../auth/offlineStore';
 import {createEncryptedAuthStore} from '../auth/mmkvStore';
-import {pick, GATE_TEXT, getLang, setLang, type Lang} from '../i18n';
+import {
+  pick,
+  GATE_TEXT,
+  LIVENESS_TEXT,
+  getLang,
+  setLang,
+  type Lang,
+} from '../i18n';
 import {speak, setSpeechEnabled} from '../speech/tts';
 import {
   ActiveLivenessChallenge,
@@ -159,10 +166,10 @@ export default function CameraScreen(): React.JSX.Element {
   }, [voice]);
 
   useEffect(() => {
-    if (page === 'camera' && voice && gate.guidance) {
-      speak(gate.guidance);
+    if (page === 'camera' && voice && gate.status) {
+      speak(GATE_TEXT[gate.status]);
     }
-  }, [page, voice, gate.guidance]);
+  }, [page, voice, gate.status]);
 
   useEffect(() => {
     let cancelled = false;
@@ -562,8 +569,12 @@ export default function CameraScreen(): React.JSX.Element {
       }
       const snap = challenge.update(latestFaceRef.current, Date.now());
       setLiveness(snap);
-      if (voice && snap.guidance) {
-        speak(snap.guidance);
+      if (voice) {
+        if (snap.status === 'running') {
+          speak(LIVENESS_TEXT[snap.challenges[snap.index]]);
+        } else if (snap.status === 'failed') {
+          speak(LIVENESS_TEXT.failed);
+        }
       }
       if (snap.status === 'passed') {
         setBusy(true);

@@ -3,14 +3,20 @@
  * (speechSynthesis). No API key, no network: it uses the device's installed
  * voices, so it works offline like the rest of the auth flow.
  *
- * Prompts are "English / हिन्दी" strings; we speak the English part as en-IN and
- * the Hindi part as hi-IN (falling back to the default voice if hi-IN is absent).
+ * Each prompt is a {hi, en} pair. We speak the selected language ONLY if a voice
+ * for it is installed; otherwise we fall back to the other language so the user
+ * always hears something. (Most laptops ship an English voice but no Hindi one,
+ * which is why selecting Hindi could be silent.)
  *
  * Chrome only lets speechSynthesis play once it has been "unlocked" inside a
- * real user gesture, so primeSpeech() must be called from a click/tap handler
- * before prompts fired from the frame loop will be audible.
+ * real user gesture, so primeSpeech() must be called from a click/tap handler.
  */
-import {speechLang} from './i18n';
+import {getLang} from './i18n';
+
+export interface SpeechPair {
+  hi: string;
+  en: string;
+}
 
 let enabled = false;
 let lastSpoken = '';
@@ -20,7 +26,7 @@ export function isSpeechSupported(): boolean {
   return typeof window !== 'undefined' && 'speechSynthesis' in window;
 }
 
-// Warm the voices list (it is async on first load).
+// Warm the voices list (it loads asynchronously on first use).
 if (isSpeechSupported()) {
   try {
     window.speechSynthesis.getVoices();
@@ -53,7 +59,7 @@ export function primeSpeech(): void {
     const synth = window.speechSynthesis;
     synth.resume();
     if (!unlocked) {
-      const u = new SpeechSynthesisUtterance(' ');
+      const u = new SpeechSynthesisUtterance('.');
       u.volume = 0;
       synth.speak(u);
       unlocked = true;
@@ -68,27 +74,44 @@ function voiceForLang(lang: string): SpeechSynthesisVoice | undefined {
   const base = lang.split('-')[0];
   return (
     voices.find(v => v.lang === lang) ||
-    voices.find(v => v.lang.replace('_', '-').startsWith(base))
+    voices.find(v => v.lang.replace('_', '-').toLowerCase().startsWith(base))
   );
 }
 
-/** Speak a (possibly bilingual) prompt once; repeated identical text is ignored. */
-export function speak(text: string): void {
-  if (!enabled || !isSpeechSupported() || !text) {
+function hasVoice(base: 'hi' | 'en'): boolean {
+  return window.speechSynthesis
+    .getVoices()
+    .some(v => v.lang.replace('_', '-').toLowerCase().startsWith(base));
+}
+
+/** Speak a prompt in a language that actually has an installed voice. */
+export function speak(pair: SpeechPair | string): void {
+  if (!enabled || !isSpeechSupported()) {
     return;
   }
-  if (text === lastSpoken) {
+  const p: SpeechPair = typeof pair === 'string' ? {hi: pair, en: pair} : pair;
+
+  const selected = getLang(); // 'hi' | 'en'
+  let use: 'hi' | 'en' = selected;
+  if (selected === 'hi' && !hasVoice('hi') && hasVoice('en')) {
+    use = 'en';
+  } else if (selected === 'en' && !hasVoice('en') && hasVoice('hi')) {
+    use = 'hi';
+  }
+
+  const text = p[use];
+  if (!text || text === lastSpoken) {
     return;
   }
   lastSpoken = text;
+
   const synth = window.speechSynthesis;
   synth.cancel();
   synth.resume();
-
-  const lang = speechLang();
+  const bcp = use === 'hi' ? 'hi-IN' : 'en-IN';
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = lang;
-  const v = voiceForLang(lang);
+  u.lang = bcp;
+  const v = voiceForLang(bcp);
   if (v) {
     u.voice = v;
   }

@@ -37,7 +37,7 @@ import {
   isSpeechSupported,
   primeSpeech,
 } from './lib/speech';
-import {setLang, getLang, pick, UI_TEXT, type Lang} from './lib/i18n';
+import {setLang, getLang, UI_TEXT, LIVENESS_TEXT, type Lang} from './lib/i18n';
 import {useCamera} from './ui/useCamera';
 import {useFaceLoop} from './ui/useFaceLoop';
 import CameraStage from './ui/CameraStage';
@@ -157,7 +157,7 @@ export default function App() {
     setSpeechEnabled(next);
     if (next) {
       primeSpeech();
-      speak(pick(UI_TEXT.voiceOn));
+      speak(UI_TEXT.voiceOn);
     }
   }, [voice]);
 
@@ -167,7 +167,7 @@ export default function App() {
     setLangState(next);
     if (voice) {
       primeSpeech();
-      speak(pick(UI_TEXT.voiceOn));
+      speak(UI_TEXT.voiceOn);
     }
   }, [lang, voice]);
 
@@ -257,7 +257,7 @@ export default function App() {
       setAuthCalls(netMonitor.authCalls);
       setMode('idle');
       setResult({ok: true, label: 'Enrolled', detail: id});
-      speak(pick(UI_TEXT.enrolled));
+      speak(UI_TEXT.enrolled);
       addLog(`Enrolled "${id}" · ${RECOGNITION.enrollSamples} samples averaged`);
       refreshData();
     },
@@ -350,7 +350,7 @@ export default function App() {
           score: composite.overall,
           components: composite.components,
         });
-        speak(pick(UI_TEXT.verified));
+        speak(UI_TEXT.verified);
         addLog(
           `Match "${best.id}" · dist ${best.distance.toFixed(3)} · ${
             inspection.drowsy ? 'DROWSY' : 'alert'
@@ -365,7 +365,7 @@ export default function App() {
           confidence: conf,
           latency,
         });
-        speak(pick(UI_TEXT.noMatch));
+        speak(UI_TEXT.noMatch);
         addLog('No matching enrollment');
       }
       netMonitor.endAuth();
@@ -423,7 +423,7 @@ export default function App() {
       setLiveness(snap);
       setPrompt(snap.prompt);
       if (snap.status === 'running') {
-        speak(snap.prompt);
+        speak(LIVENESS_TEXT[snap.challenges[snap.index]]);
       }
       if (snap.status === 'passed' && !busyRef.current) {
         busyRef.current = true;
@@ -464,7 +464,7 @@ export default function App() {
         netMonitor.endAuth();
         setAuthCalls(netMonitor.authCalls);
         setResult({ok: false, label: 'Liveness failed', detail: 'retry'});
-        speak(snap.prompt);
+        speak(LIVENESS_TEXT.failed);
         addLog('Liveness challenge failed · presentation attack blocked');
         setMode('idle');
         livenessRef.current = null;
