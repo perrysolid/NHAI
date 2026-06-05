@@ -4,8 +4,22 @@
  * Uses Postgres when DATABASE_URL is set (recommended on AWS/Render for
  * durability), otherwise an in-memory store so the service deploys and runs
  * instantly for a demo. Both dedupe on (userId, timestamp, deviceId).
+ *
+ * Each record carries an optional frame-inspection snapshot (drowsiness, pose,
+ * lighting) captured on-device at verification time.
  */
 import {Pool} from 'pg';
+
+export interface InspectionMetrics {
+  ear: number;
+  perclos: number;
+  blinkRate: number;
+  drowsy: boolean;
+  lookingAway: boolean;
+  yawDeg: number;
+  pitchDeg: number;
+  brightness: number;
+}
 
 export interface AttendanceRecord {
   userId: string;
@@ -13,6 +27,7 @@ export interface AttendanceRecord {
   livenessPassed: boolean;
   matchDistance: number;
   deviceId: string;
+  inspection?: InspectionMetrics;
 }
 
 export interface Store {
@@ -24,6 +39,28 @@ export interface Store {
 
 function keyOf(r: AttendanceRecord): string {
   return `${r.userId}|${r.timestamp}|${r.deviceId}`;
+}
+
+function num(v: unknown, fallback = 0): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function sanitizeInspection(raw: unknown): InspectionMetrics | undefined {
+  if (typeof raw !== 'object' || raw === null) {
+    return undefined;
+  }
+  const o = raw as Record<string, unknown>;
+  return {
+    ear: num(o.ear),
+    perclos: num(o.perclos),
+    blinkRate: num(o.blinkRate),
+    drowsy: Boolean(o.drowsy),
+    lookingAway: Boolean(o.lookingAway),
+    yawDeg: num(o.yawDeg),
+    pitchDeg: num(o.pitchDeg),
+    brightness: num(o.brightness),
+  };
 }
 
 function sanitize(r: unknown): AttendanceRecord | null {
@@ -43,7 +80,8 @@ function sanitize(r: unknown): AttendanceRecord | null {
     timestamp,
     deviceId: o.deviceId.slice(0, 128),
     livenessPassed: Boolean(o.livenessPassed),
-    matchDistance: Number(o.matchDistance) || 0,
+    matchDistance: num(o.matchDistance),
+    inspection: sanitizeInspection(o.inspection),
   };
 }
 
@@ -107,20 +145,32 @@ class PostgresStore implements Store {
         device_id      TEXT   NOT NULL,
         liveness_passed BOOLEAN NOT NULL,
         match_distance REAL   NOT NULL,
+        metrics        JSONB,
         created_at     TIMESTAMPTZ DEFAULT now(),
         PRIMARY KEY (user_id, ts, device_id)
       );
     `);
+    // tolerate pre-existing tables without the metrics column
+    await this.pool.query(
+      `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS metrics JSONB;`,
+    );
   }
 
   async add(records: AttendanceRecord[]): Promise<number> {
     let accepted = 0;
     for (const r of records) {
       const res = await this.pool.query(
-        `INSERT INTO attendance (user_id, ts, device_id, liveness_passed, match_distance)
-         VALUES ($1,$2,$3,$4,$5)
+        `INSERT INTO attendance (user_id, ts, device_id, liveness_passed, match_distance, metrics)
+         VALUES ($1,$2,$3,$4,$5,$6)
          ON CONFLICT (user_id, ts, device_id) DO NOTHING`,
-        [r.userId, r.timestamp, r.deviceId, r.livenessPassed, r.matchDistance],
+        [
+          r.userId,
+          r.timestamp,
+          r.deviceId,
+          r.livenessPassed,
+          r.matchDistance,
+          r.inspection ? JSON.stringify(r.inspection) : null,
+        ],
       );
       accepted += res.rowCount ?? 0;
     }
@@ -129,7 +179,7 @@ class PostgresStore implements Store {
 
   async list(limit: number, since = 0): Promise<AttendanceRecord[]> {
     const res = await this.pool.query(
-      `SELECT user_id, ts, device_id, liveness_passed, match_distance
+      `SELECT user_id, ts, device_id, liveness_passed, match_distance, metrics
          FROM attendance WHERE ts >= $1
         ORDER BY ts DESC LIMIT $2`,
       [since, limit],
@@ -140,6 +190,7 @@ class PostgresStore implements Store {
       deviceId: row.device_id,
       livenessPassed: row.liveness_passed,
       matchDistance: row.match_distance,
+      inspection: sanitizeInspection(row.metrics),
     }));
   }
 }
