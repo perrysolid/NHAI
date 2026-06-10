@@ -144,6 +144,7 @@ export default function CameraScreen(): React.JSX.Element {
   const busyRef = useRef(false);
   const gateReadyRef = useRef(false);
   const lastAutoRef = useRef(0);
+  const lastVerifyRef = useRef(0);
 
   useEffect(() => {
     busyRef.current = busy;
@@ -480,6 +481,26 @@ export default function CameraScreen(): React.JSX.Element {
     setVerdict(null);
   }, [store]);
 
+  // Autonomous verification: while on the verify camera, start the liveness +
+  // match flow automatically whenever a face appears — no manual tapping. A
+  // cooldown spaces out re-verification so a steady result stays readable.
+  useEffect(() => {
+    if (page !== 'camera' || mode !== 'verify' || engineState !== 'ready') {
+      return;
+    }
+    const id = setInterval(() => {
+      if (busyRef.current || challengeRef.current || !latestFaceRef.current) {
+        return;
+      }
+      if (Date.now() - lastVerifyRef.current < 3000) {
+        return;
+      }
+      lastVerifyRef.current = Date.now();
+      startVerify();
+    }, 200);
+    return () => clearInterval(id);
+  }, [page, mode, engineState, startVerify]);
+
   const runVerify = useCallback(async () => {
     const engine = engineRef.current;
     const tensors = latestTensorsRef.current;
@@ -736,7 +757,9 @@ export default function CameraScreen(): React.JSX.Element {
           <Text style={styles.cameraActionHint}>
             {engineState === 'ready'
               ? gate.ready
-                ? 'Face detected. Tap the button to continue.'
+                ? mode === 'enroll'
+                  ? 'Face detected — capturing automatically. Hold steady.'
+                  : 'Face detected — verifying automatically. Hold steady.'
                 : gate.guidance
               : engineState === 'loading'
               ? 'Loading offline models...'

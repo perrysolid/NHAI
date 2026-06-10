@@ -134,18 +134,34 @@ export function preprocessRgb(
   rgb: Uint8Array,
   spec: RecognitionSpec | typeof LIVENESS_MODEL,
 ): TensorInput {
-  const expected = spec.inputSize * spec.inputSize * spec.channels;
+  const pixels = spec.inputSize * spec.inputSize;
+  const expected = pixels * spec.channels;
+  // The native resize plugin can hand back RGBA (or another channel count)
+  // depending on the device's camera frame format. Repack to tightly-packed RGB
+  // instead of hard-failing — that mismatch is what produced the
+  // "Expected 37632 RGB bytes, got N" capture failures on real phones.
+  let src = rgb;
   if (rgb.length !== expected) {
-    throw new Error(`Expected ${expected} RGB bytes, got ${rgb.length}`);
+    if (rgb.length % pixels !== 0 || rgb.length / pixels < spec.channels) {
+      throw new Error(`Expected ${expected} RGB bytes, got ${rgb.length}`);
+    }
+    const channels = rgb.length / pixels;
+    const packed = new Uint8Array(expected);
+    for (let p = 0; p < pixels; p++) {
+      packed[p * 3] = rgb[p * channels];
+      packed[p * 3 + 1] = rgb[p * channels + 1];
+      packed[p * 3 + 2] = rgb[p * channels + 2];
+    }
+    src = packed;
   }
   if (spec.dtype === 'uint8') {
-    return rgb;
+    return src;
   }
-  const out = new Float32Array(rgb.length);
-  for (let i = 0; i < rgb.length; i += 3) {
-    out[i] = rgb[i] / 255 / spec.std[0] - spec.mean[0] / spec.std[0];
-    out[i + 1] = rgb[i + 1] / 255 / spec.std[1] - spec.mean[1] / spec.std[1];
-    out[i + 2] = rgb[i + 2] / 255 / spec.std[2] - spec.mean[2] / spec.std[2];
+  const out = new Float32Array(expected);
+  for (let i = 0; i < expected; i += 3) {
+    out[i] = src[i] / 255 / spec.std[0] - spec.mean[0] / spec.std[0];
+    out[i + 1] = src[i + 1] / 255 / spec.std[1] - spec.mean[1] / spec.std[1];
+    out[i + 2] = src[i + 2] / 255 / spec.std[2] - spec.mean[2] / spec.std[2];
   }
   return out;
 }
