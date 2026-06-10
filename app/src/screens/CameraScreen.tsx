@@ -68,7 +68,7 @@ type EngineState = 'loading' | 'ready' | 'error';
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
 // Bump alongside android versionName so a screenshot reveals the running build.
-const APP_VERSION = 'v1.4 · build 5';
+const APP_VERSION = 'v1.5 · build 6';
 
 interface LatestTensors {
   recognition: Uint8Array;
@@ -224,8 +224,8 @@ export default function CameraScreen(): React.JSX.Element {
           frameWidth: number,
           brightness: number,
           rgbLen: number,
-          recognitionRgb?: Uint8Array,
-          livenessRgb?: Uint8Array,
+          recognitionRgb?: number[],
+          livenessRgb?: number[],
         ) => {
           const gateResult = evaluateFace({faces, frameWidth, brightness});
           setGate(gateResult);
@@ -281,8 +281,8 @@ export default function CameraScreen(): React.JSX.Element {
           return len >= pixels * 3 && len % pixels === 0;
         };
 
-        let recognitionRgb: Uint8Array | undefined;
-        let livenessRgb: Uint8Array | undefined;
+        let recognitionRgb: number[] | undefined;
+        let livenessRgb: number[] | undefined;
         let rgbLen = 0; // diagnostic: raw resize length seen in the worklet
 
         // Only build model tensors when exactly one face is present (capture
@@ -311,11 +311,21 @@ export default function CameraScreen(): React.JSX.Element {
               okLen(rec.length, recogPixels) &&
               okLen(liv.length, livePixels)
             ) {
-              // Copy into fresh buffers IN THE WORKLET so the pixels survive the
-              // hop to JS — the plugin reuses/recycles its native frame buffer,
-              // which can read back as length 0 on the JS thread otherwise.
-              recognitionRgb = new Uint8Array(rec);
-              livenessRgb = new Uint8Array(liv);
+              // Materialize to plain number[] IN THE WORKLET. worklets-core
+              // serializes plain arrays across the JS boundary reliably, whereas
+              // a (Shared/Uint8)Array arrives EMPTY on the JS thread — the
+              // observed rgb=37632 but tns=0 failure on real devices. Explicit
+              // pre-sized loops avoid relying on Array.from in the worklet.
+              const recArr: number[] = new Array(rec.length);
+              for (let k = 0; k < rec.length; k++) {
+                recArr[k] = rec[k];
+              }
+              const livArr: number[] = new Array(liv.length);
+              for (let k = 0; k < liv.length; k++) {
+                livArr[k] = liv[k];
+              }
+              recognitionRgb = recArr;
+              livenessRgb = livArr;
             }
           } catch {
             recognitionRgb = undefined;
