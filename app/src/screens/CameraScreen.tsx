@@ -67,6 +67,9 @@ type EngineState = 'loading' | 'ready' | 'error';
 
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
+// Bump alongside android versionName so a screenshot reveals the running build.
+const APP_VERSION = 'v1.3 · build 4';
+
 interface LatestTensors {
   recognition: Uint8Array;
   liveness: Uint8Array;
@@ -113,6 +116,7 @@ export default function CameraScreen(): React.JSX.Element {
   const latestFaceRef = useRef<Face | null>(null);
   const latestBrightnessRef = useRef(0);
   const latestTensorsRef = useRef<LatestTensors | null>(null);
+  const latestRgbLenRef = useRef(0);
   const enrollSamplesRef = useRef<Float32Array[]>([]);
   const challengeRef = useRef<ActiveLivenessChallenge | null>(null);
   // Mirrors for stable closures used by the autonomous capture loop.
@@ -198,6 +202,7 @@ export default function CameraScreen(): React.JSX.Element {
           faces: Face[],
           frameWidth: number,
           brightness: number,
+          rgbLen: number,
           recognitionRgb?: Uint8Array,
           livenessRgb?: Uint8Array,
         ) => {
@@ -205,6 +210,7 @@ export default function CameraScreen(): React.JSX.Element {
           setGate(gateResult);
           latestFaceRef.current = faces.length === 1 ? faces[0] : null;
           latestBrightnessRef.current = brightness;
+          latestRgbLenRef.current = rgbLen;
           if (recognitionRgb && livenessRgb) {
             latestTensorsRef.current = {
               recognition: new Uint8Array(recognitionRgb),
@@ -256,40 +262,53 @@ export default function CameraScreen(): React.JSX.Element {
 
         let recognitionRgb: Uint8Array | undefined;
         let livenessRgb: Uint8Array | undefined;
+        let rgbLen = 0; // diagnostic: raw resize length seen in the worklet
 
-        // IMPORTANT: do NOT pass a manual `crop`. On Android the plugin's crop
-        // rectangle is applied in the rotated sensor buffer space, so a crop
-        // computed from frame.width/height (or the face bbox) lands out of
-        // bounds and the plugin returns an EMPTY buffer ("got 0"). The default
-        // (no-crop) path does an orientation-safe center-crop to the target
-        // aspect ratio — the same path the brightness resize already uses
-        // reliably. The quality gate keeps the face centered, so the center
-        // square contains the face.
-        try {
-          const rec = resize(frame, {
-            scale: {width: recogSize, height: recogSize},
-            pixelFormat: 'rgb',
-            dataType: 'uint8',
-          }) as Uint8Array;
-          const liv = resize(frame, {
-            scale: {width: liveSize, height: liveSize},
-            pixelFormat: 'rgb',
-            dataType: 'uint8',
-          }) as Uint8Array;
-          if (
-            rec &&
-            liv &&
-            okLen(rec.length, recogPixels) &&
-            okLen(liv.length, livePixels)
-          ) {
-            recognitionRgb = rec;
-            livenessRgb = liv;
+        // Only build model tensors when exactly one face is present (capture
+        // needs one). IMPORTANT: do NOT pass a manual `crop` — on Android the
+        // plugin applies it in the rotated sensor buffer space, so a crop from
+        // frame dims / face bbox lands out of bounds and the plugin returns an
+        // EMPTY buffer ("got 0"). The default no-crop path does an
+        // orientation-safe center-crop (same path the brightness resize uses
+        // reliably); the quality gate keeps the face centered.
+        if (faces.length === 1) {
+          try {
+            const rec = resize(frame, {
+              scale: {width: recogSize, height: recogSize},
+              pixelFormat: 'rgb',
+              dataType: 'uint8',
+            }) as Uint8Array;
+            const liv = resize(frame, {
+              scale: {width: liveSize, height: liveSize},
+              pixelFormat: 'rgb',
+              dataType: 'uint8',
+            }) as Uint8Array;
+            rgbLen = rec ? rec.length : 0;
+            if (
+              rec &&
+              liv &&
+              okLen(rec.length, recogPixels) &&
+              okLen(liv.length, livePixels)
+            ) {
+              // Copy into fresh buffers IN THE WORKLET so the pixels survive the
+              // hop to JS — the plugin reuses/recycles its native frame buffer,
+              // which can read back as length 0 on the JS thread otherwise.
+              recognitionRgb = new Uint8Array(rec);
+              livenessRgb = new Uint8Array(liv);
+            }
+          } catch {
+            recognitionRgb = undefined;
+            livenessRgb = undefined;
           }
-        } catch {
-          recognitionRgb = undefined;
-          livenessRgb = undefined;
         }
-        onSignals(faces, frame.width, brightness, recognitionRgb, livenessRgb);
+        onSignals(
+          faces,
+          frame.width,
+          brightness,
+          rgbLen,
+          recognitionRgb,
+          livenessRgb,
+        );
       });
     },
     [detectFaces, resize, onSignals],
@@ -361,7 +380,11 @@ export default function CameraScreen(): React.JSX.Element {
       throw new Error(pick(GATE_TEXT.no_face));
     }
     if (!tensors) {
-      throw new Error('Hold steady for a moment');
+      // Diagnostic: rgb=0 means the resize plugin returned an empty buffer on
+      // this device; rgb>0 means a transfer/storage issue.
+      throw new Error(
+        `Hold steady for a moment (rgb=${latestRgbLenRef.current})`,
+      );
     }
     const spec = RECOGNITION_MODELS[ACTIVE_RECOGNITION];
     return engine.embedFace(preprocessRgb(tensors.recognition, spec));
@@ -917,6 +940,8 @@ function HomePage({
           <Text style={styles.dangerButtonText}>Reset local demo data</Text>
         </TouchableOpacity>
       )}
+
+      <Text style={styles.versionTag}>{APP_VERSION}</Text>
     </View>
   );
 }
@@ -1244,6 +1269,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   dangerButtonText: {color: '#ff6b6b', fontWeight: '800'},
+  versionTag: {
+    color: '#4a5560',
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 16,
+  },
   verdict: {
     marginTop: 12,
     borderColor: '#ff6b6b',
