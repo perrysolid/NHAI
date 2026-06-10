@@ -40,7 +40,7 @@ import {
 import {evaluateFace} from '../camera/qualityGates';
 import {autoFireReady} from '../camera/autoCapture';
 import {meanLuma} from '../camera/frameUtils';
-import type {Face, FaceBounds, GateResult} from '../camera/types';
+import type {Face, GateResult} from '../camera/types';
 import {OfflineAuthStore} from '../auth/offlineStore';
 import {createEncryptedAuthStore} from '../auth/mmkvStore';
 import {
@@ -85,32 +85,6 @@ const INITIAL_GATE: GateResult = {
   guidance: pick(GATE_TEXT.no_face),
   ready: false,
 };
-
-function clamp(n: number, min: number, max: number): number {
-  'worklet';
-  return Math.max(min, Math.min(max, n));
-}
-
-function expandedSquare(
-  bounds: FaceBounds,
-  frameWidth: number,
-  frameHeight: number,
-  expansion: number,
-): FaceBounds {
-  'worklet';
-  const size = Math.max(bounds.width, bounds.height) * expansion;
-  const cx = bounds.x + bounds.width / 2;
-  const cy = bounds.y + bounds.height / 2;
-  const x = clamp(cx - size / 2, 0, Math.max(0, frameWidth - size));
-  const y = clamp(cy - size / 2, 0, Math.max(0, frameHeight - size));
-  const maxSize = Math.min(size, frameWidth - x, frameHeight - y);
-  return {
-    x: Math.round(x),
-    y: Math.round(y),
-    width: Math.round(maxSize),
-    height: Math.round(maxSize),
-  };
-}
 
 function createInspectorId(): string {
   return `inspector_${Date.now().toString(36).slice(-6)}`;
@@ -268,23 +242,13 @@ export default function CameraScreen(): React.JSX.Element {
           brightness = 0;
         }
 
-        // A centered square crop is always in-bounds — the robust fallback that
-        // guarantees we always have model tensors even if the face bbox crop
-        // (which depends on the device's frame orientation) fails.
-        const side = Math.min(frame.width, frame.height);
-        const centerCrop = {
-          x: Math.round((frame.width - side) / 2),
-          y: Math.round((frame.height - side) / 2),
-          width: Math.round(side),
-          height: Math.round(side),
-        };
         const recogSize = RECOGNITION_MODELS[ACTIVE_RECOGNITION].inputSize;
         const liveSize = LIVENESS_MODEL.inputSize;
         const recogPixels = recogSize * recogSize;
         const livePixels = liveSize * liveSize;
         // Accept a buffer only when it has whole-pixel RGB(A) data — never an
-        // empty buffer (the "got 0" failure on some devices). preprocessRgb
-        // tolerates an extra alpha channel, so accept >= 3 channels.
+        // empty buffer (the "got 0" failure). preprocessRgb tolerates an extra
+        // alpha channel, so accept >= 3 channels.
         const okLen = (len: number, pixels: number): boolean => {
           'worklet';
           return len >= pixels * 3 && len % pixels === 0;
@@ -293,41 +257,25 @@ export default function CameraScreen(): React.JSX.Element {
         let recognitionRgb: Uint8Array | undefined;
         let livenessRgb: Uint8Array | undefined;
 
-        let crop = centerCrop;
-        if (faces.length === 1) {
-          const fc = expandedSquare(
-            faces[0].bounds,
-            frame.width,
-            frame.height,
-            1.6,
-          );
-          if (fc.width > 24 && fc.height > 24) {
-            crop = fc;
-          }
-        }
-        // Try the face crop, then a guaranteed in-bounds centered crop. Keep the
-        // first attempt that yields valid-length tensors for BOTH models.
-        for (let i = 0; i < 2 && !recognitionRgb; i++) {
-          const c = i === 0 ? crop : centerCrop;
-          let rec: Uint8Array | undefined;
-          let liv: Uint8Array | undefined;
-          try {
-            rec = resize(frame, {
-              scale: {width: recogSize, height: recogSize},
-              crop: c,
-              pixelFormat: 'rgb',
-              dataType: 'uint8',
-            }) as Uint8Array;
-            liv = resize(frame, {
-              scale: {width: liveSize, height: liveSize},
-              crop: c,
-              pixelFormat: 'rgb',
-              dataType: 'uint8',
-            }) as Uint8Array;
-          } catch {
-            rec = undefined;
-            liv = undefined;
-          }
+        // IMPORTANT: do NOT pass a manual `crop`. On Android the plugin's crop
+        // rectangle is applied in the rotated sensor buffer space, so a crop
+        // computed from frame.width/height (or the face bbox) lands out of
+        // bounds and the plugin returns an EMPTY buffer ("got 0"). The default
+        // (no-crop) path does an orientation-safe center-crop to the target
+        // aspect ratio — the same path the brightness resize already uses
+        // reliably. The quality gate keeps the face centered, so the center
+        // square contains the face.
+        try {
+          const rec = resize(frame, {
+            scale: {width: recogSize, height: recogSize},
+            pixelFormat: 'rgb',
+            dataType: 'uint8',
+          }) as Uint8Array;
+          const liv = resize(frame, {
+            scale: {width: liveSize, height: liveSize},
+            pixelFormat: 'rgb',
+            dataType: 'uint8',
+          }) as Uint8Array;
           if (
             rec &&
             liv &&
@@ -337,6 +285,9 @@ export default function CameraScreen(): React.JSX.Element {
             recognitionRgb = rec;
             livenessRgb = liv;
           }
+        } catch {
+          recognitionRgb = undefined;
+          livenessRgb = undefined;
         }
         onSignals(faces, frame.width, brightness, recognitionRgb, livenessRgb);
       });
