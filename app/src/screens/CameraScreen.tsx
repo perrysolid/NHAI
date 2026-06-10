@@ -68,7 +68,7 @@ type EngineState = 'loading' | 'ready' | 'error';
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
 // Bump alongside android versionName so a screenshot reveals the running build.
-const APP_VERSION = 'v1.5 · build 6';
+const APP_VERSION = 'v1.6 · build 7';
 
 interface LatestTensors {
   recognition: Uint8Array;
@@ -108,7 +108,6 @@ export default function CameraScreen(): React.JSX.Element {
   const [enrolled, setEnrolled] = useState(0);
   const [pending, setPending] = useState(0);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
-  const [dbg, setDbg] = useState('');
   const [liveness, setLiveness] = useState<LivenessSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -124,7 +123,9 @@ export default function CameraScreen(): React.JSX.Element {
   const busyRef = useRef(false);
   const gateReadyRef = useRef(false);
   const lastAutoRef = useRef(0);
-  const lastVerifyRef = useRef(0);
+  // Re-armed only after the face leaves the ring, so auto-verify fires once per
+  // presentation instead of looping.
+  const verifyArmedRef = useRef(true);
 
   useEffect(() => {
     busyRef.current = busy;
@@ -132,26 +133,6 @@ export default function CameraScreen(): React.JSX.Element {
   useEffect(() => {
     gateReadyRef.current = gate.ready;
   }, [gate.ready]);
-
-  // Live on-screen diagnostic so a single screenshot shows the capture pipeline
-  // state: gate ready, face present, raw resize length, stored tensor length,
-  // engine loaded. Pinpoints exactly where capture stalls on a given device.
-  useEffect(() => {
-    if (page !== 'camera') {
-      return;
-    }
-    const id = setInterval(() => {
-      const t = latestTensorsRef.current;
-      setDbg(
-        `dbg ready=${gateReadyRef.current ? 1 : 0} face=${
-          latestFaceRef.current ? 1 : 0
-        } rgb=${latestRgbLenRef.current} tns=${
-          t ? t.recognition.length : 0
-        } eng=${engineRef.current ? 1 : 0} busy=${busyRef.current ? 1 : 0}`,
-      );
-    }, 400);
-    return () => clearInterval(id);
-  }, [page]);
 
   const refreshCounts = useCallback(() => {
     setEnrolled(store.listEnrollments().length);
@@ -504,32 +485,6 @@ export default function CameraScreen(): React.JSX.Element {
     setVerdict(null);
   }, [store]);
 
-  // Autonomous verification: while on the verify camera, start the liveness +
-  // match flow automatically as soon as the face is centered — no tapping. A
-  // cooldown spaces out re-verification so a steady result stays readable.
-  useEffect(() => {
-    if (page !== 'camera' || mode !== 'verify' || engineState !== 'ready') {
-      return;
-    }
-    const id = setInterval(() => {
-      const now = Date.now();
-      if (
-        !autoFireReady({
-          now,
-          lastAt: lastVerifyRef.current,
-          cooldownMs: 3000,
-          blocked: busyRef.current || challengeRef.current !== null,
-          gateReady: gateReadyRef.current,
-        })
-      ) {
-        return;
-      }
-      lastVerifyRef.current = now;
-      startVerify();
-    }, 200);
-    return () => clearInterval(id);
-  }, [page, mode, engineState, startVerify]);
-
   const runVerify = useCallback(async () => {
     const engine = engineRef.current;
     const tensors = latestTensorsRef.current;
@@ -607,6 +562,49 @@ export default function CameraScreen(): React.JSX.Element {
       latencyMs,
     });
   }, [refreshCounts, store, userId]);
+
+  const autoVerify = useCallback(() => {
+    if (busyRef.current) {
+      return;
+    }
+    setBusy(true);
+    runVerify()
+      .catch((e: unknown) =>
+        setVerdict({
+          ok: false,
+          title: 'Verify failed',
+          detail: e instanceof Error ? e.message : 'Try again',
+        }),
+      )
+      .finally(() => setBusy(false));
+  }, [runVerify]);
+
+  // Autonomous verification — fully hands-free. As soon as the face is centered
+  // it runs passive anti-spoof + match (no blink/smile/turn gesture needed).
+  // Fires once per presentation: it re-arms only after the face leaves the ring,
+  // so a result never loops. The active-liveness challenge stays on the manual
+  // "Start liveness + verify" button for anyone who wants to demo it.
+  useEffect(() => {
+    if (page !== 'camera' || mode !== 'verify' || engineState !== 'ready') {
+      return;
+    }
+    const id = setInterval(() => {
+      if (!gateReadyRef.current) {
+        verifyArmedRef.current = true; // face left → arm for next presentation
+        return;
+      }
+      if (
+        busyRef.current ||
+        challengeRef.current !== null ||
+        !verifyArmedRef.current
+      ) {
+        return;
+      }
+      verifyArmedRef.current = false;
+      autoVerify();
+    }, 200);
+    return () => clearInterval(id);
+  }, [page, mode, engineState, autoVerify]);
 
   useEffect(() => {
     if (mode !== 'verify' || !liveness || liveness.status !== 'running') {
@@ -798,7 +796,6 @@ export default function CameraScreen(): React.JSX.Element {
               ? 'Loading offline models...'
               : engineError}
           </Text>
-          <Text style={styles.debugText}>{dbg}</Text>
         </View>
       </View>
 
@@ -880,9 +877,10 @@ export default function CameraScreen(): React.JSX.Element {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Run local verification</Text>
             <Text style={styles.helperText}>
-              Center your face in the ring — verification starts automatically.
-              The phone runs active liveness, MiniFASNet passive anti-spoof and
-              MobileFaceNet matching on-device. No tapping needed.
+              Center your face in the ring — verification runs automatically with
+              MiniFASNet passive anti-spoof + MobileFaceNet matching on-device,
+              no gestures needed. Tap below to run the randomized blink / smile /
+              head-turn active-liveness challenge instead.
             </Text>
             <TouchableOpacity
               disabled={busy || engineState !== 'ready'}
@@ -1190,13 +1188,6 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginTop: 8,
     textAlign: 'center',
-  },
-  debugText: {
-    color: '#f2b347',
-    fontSize: 11,
-    fontFamily: 'monospace',
-    textAlign: 'center',
-    marginTop: 6,
   },
   statusPill: {
     backgroundColor: 'rgba(242,179,71,0.16)',
