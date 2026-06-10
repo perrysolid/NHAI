@@ -448,13 +448,14 @@ export default function CameraScreen(): React.JSX.Element {
   }, [captureEmbedding, refreshCounts, store, userId]);
 
   // Autonomous enrollment: while on the enroll camera, capture steady samples
-  // automatically whenever a face is present — no manual tapping per sample.
+  // automatically as soon as the face is centered in the ring — no tapping. The
+  // quality gate (gateReadyRef) is the "face in the center" trigger.
   useEffect(() => {
     if (page !== 'camera' || mode !== 'enroll' || engineState !== 'ready') {
       return;
     }
     const id = setInterval(() => {
-      if (busyRef.current || !latestFaceRef.current) {
+      if (busyRef.current || !gateReadyRef.current) {
         return;
       }
       if (Date.now() - lastAutoRef.current < 700) {
@@ -482,14 +483,14 @@ export default function CameraScreen(): React.JSX.Element {
   }, [store]);
 
   // Autonomous verification: while on the verify camera, start the liveness +
-  // match flow automatically whenever a face appears — no manual tapping. A
+  // match flow automatically as soon as the face is centered — no tapping. A
   // cooldown spaces out re-verification so a steady result stays readable.
   useEffect(() => {
     if (page !== 'camera' || mode !== 'verify' || engineState !== 'ready') {
       return;
     }
     const id = setInterval(() => {
-      if (busyRef.current || challengeRef.current || !latestFaceRef.current) {
+      if (busyRef.current || challengeRef.current || !gateReadyRef.current) {
         return;
       }
       if (Date.now() - lastVerifyRef.current < 3000) {
@@ -816,9 +817,10 @@ export default function CameraScreen(): React.JSX.Element {
             <Text style={styles.cardTitle}>Capture local face template</Text>
             <Text style={styles.idLine}>{userId.trim()}</Text>
             <Text style={styles.helperText}>
-              Hold your face in the circle — {THRESHOLDS.enrollSamples} samples
-              are captured automatically and stored on this phone. You can also
-              tap below to capture manually.
+              Center your face in the ring — it turns green and all{' '}
+              {THRESHOLDS.enrollSamples} samples are captured automatically and
+              stored on this phone. No tapping needed (manual button below is a
+              fallback).
             </Text>
             <TouchableOpacity
               disabled={busy || engineState !== 'ready'}
@@ -845,8 +847,9 @@ export default function CameraScreen(): React.JSX.Element {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Run local verification</Text>
             <Text style={styles.helperText}>
+              Center your face in the ring — verification starts automatically.
               The phone runs active liveness, MiniFASNet passive anti-spoof and
-              MobileFaceNet matching on-device.
+              MobileFaceNet matching on-device. No tapping needed.
             </Text>
             <TouchableOpacity
               disabled={busy || engineState !== 'ready'}

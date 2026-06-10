@@ -18,7 +18,7 @@ export default function GuidanceOverlay({
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
       <View style={styles.ringWrap}>
-        <View style={styles.ring} />
+        <View style={[styles.ring, gate.ready && styles.ringReady]} />
       </View>
       <View style={[styles.banner, gate.ready && styles.bannerReady]}>
         <Text style={styles.bannerText}>{gate.guidance}</Text>
@@ -41,6 +41,9 @@ const styles = StyleSheet.create({
     borderColor: OVAL_COLOR,
     borderWidth: 4,
   },
+  // Turns green the instant the face is centered — the visual cue that the
+  // automatic capture / verify is firing, so no tap is needed.
+  ringReady: {borderColor: '#22c55e', borderWidth: 6},
   banner: {
     position: 'absolute',
     bottom: 202,
