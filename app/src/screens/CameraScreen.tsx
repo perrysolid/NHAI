@@ -68,7 +68,7 @@ type EngineState = 'loading' | 'ready' | 'error';
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
 // Bump alongside android versionName so a screenshot reveals the running build.
-const APP_VERSION = 'v1.3 · build 4';
+const APP_VERSION = 'v1.4 · build 5';
 
 interface LatestTensors {
   recognition: Uint8Array;
@@ -108,6 +108,7 @@ export default function CameraScreen(): React.JSX.Element {
   const [enrolled, setEnrolled] = useState(0);
   const [pending, setPending] = useState(0);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
+  const [dbg, setDbg] = useState('');
   const [liveness, setLiveness] = useState<LivenessSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -131,6 +132,26 @@ export default function CameraScreen(): React.JSX.Element {
   useEffect(() => {
     gateReadyRef.current = gate.ready;
   }, [gate.ready]);
+
+  // Live on-screen diagnostic so a single screenshot shows the capture pipeline
+  // state: gate ready, face present, raw resize length, stored tensor length,
+  // engine loaded. Pinpoints exactly where capture stalls on a given device.
+  useEffect(() => {
+    if (page !== 'camera') {
+      return;
+    }
+    const id = setInterval(() => {
+      const t = latestTensorsRef.current;
+      setDbg(
+        `dbg ready=${gateReadyRef.current ? 1 : 0} face=${
+          latestFaceRef.current ? 1 : 0
+        } rgb=${latestRgbLenRef.current} tns=${
+          t ? t.recognition.length : 0
+        } eng=${engineRef.current ? 1 : 0} busy=${busyRef.current ? 1 : 0}`,
+      );
+    }, 400);
+    return () => clearInterval(id);
+  }, [page]);
 
   const refreshCounts = useCallback(() => {
     setEnrolled(store.listEnrollments().length);
@@ -767,6 +788,7 @@ export default function CameraScreen(): React.JSX.Element {
               ? 'Loading offline models...'
               : engineError}
           </Text>
+          <Text style={styles.debugText}>{dbg}</Text>
         </View>
       </View>
 
@@ -1158,6 +1180,13 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginTop: 8,
     textAlign: 'center',
+  },
+  debugText: {
+    color: '#f2b347',
+    fontSize: 11,
+    fontFamily: 'monospace',
+    textAlign: 'center',
+    marginTop: 6,
   },
   statusPill: {
     backgroundColor: 'rgba(242,179,71,0.16)',
