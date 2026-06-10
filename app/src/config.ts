@@ -114,12 +114,15 @@ export const THRESHOLDS = {
   livenessMotionRange: 0.3,
   /** Active-challenge window (generous so real users complete all 3 actions). */
   activeChallengeTimeoutMs: 10000,
-  /** Quality gates — advisory guidance, kept forgiving for field use. */
-  maxYawDeg: 36,
-  maxPitchDeg: 36,
-  minFaceRatio: 0.12, // face bbox width / frame width
-  minBrightness: 38, // mean luma 0..255
-  maxBrightness: 245,
+  /** Quality gates — advisory guidance, kept forgiving for field use. Loosened
+   *  so the "face centered" ready state (which drives hands-free auto-capture /
+   *  auto-verify) triggers readily; only a clear profile, a tiny/distant face,
+   *  or near-black / blown-out frames still block. */
+  maxYawDeg: 45,
+  maxPitchDeg: 45,
+  minFaceRatio: 0.09, // face bbox width / frame width
+  minBrightness: 25, // mean luma 0..255
+  maxBrightness: 252,
   /** Active-liveness landmark cutoffs (ML Kit probabilities 0..1). */
   blinkClosedProb: 0.35,
   blinkOpenProb: 0.65,

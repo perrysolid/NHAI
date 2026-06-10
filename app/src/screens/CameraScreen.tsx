@@ -38,6 +38,7 @@ import {
   THRESHOLDS,
 } from '../config';
 import {evaluateFace} from '../camera/qualityGates';
+import {autoFireReady} from '../camera/autoCapture';
 import {meanLuma} from '../camera/frameUtils';
 import type {Face, FaceBounds, GateResult} from '../camera/types';
 import {OfflineAuthStore} from '../auth/offlineStore';
@@ -455,13 +456,19 @@ export default function CameraScreen(): React.JSX.Element {
       return;
     }
     const id = setInterval(() => {
-      if (busyRef.current || !gateReadyRef.current) {
+      const now = Date.now();
+      if (
+        !autoFireReady({
+          now,
+          lastAt: lastAutoRef.current,
+          cooldownMs: 700,
+          blocked: busyRef.current,
+          gateReady: gateReadyRef.current,
+        })
+      ) {
         return;
       }
-      if (Date.now() - lastAutoRef.current < 700) {
-        return;
-      }
-      lastAutoRef.current = Date.now();
+      lastAutoRef.current = now;
       onCaptureEnroll().catch(() => undefined);
     }, 200);
     return () => clearInterval(id);
@@ -490,13 +497,19 @@ export default function CameraScreen(): React.JSX.Element {
       return;
     }
     const id = setInterval(() => {
-      if (busyRef.current || challengeRef.current || !gateReadyRef.current) {
+      const now = Date.now();
+      if (
+        !autoFireReady({
+          now,
+          lastAt: lastVerifyRef.current,
+          cooldownMs: 3000,
+          blocked: busyRef.current || challengeRef.current !== null,
+          gateReady: gateReadyRef.current,
+        })
+      ) {
         return;
       }
-      if (Date.now() - lastVerifyRef.current < 3000) {
-        return;
-      }
-      lastVerifyRef.current = Date.now();
+      lastVerifyRef.current = now;
       startVerify();
     }, 200);
     return () => clearInterval(id);

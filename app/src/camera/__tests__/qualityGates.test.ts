@@ -45,7 +45,7 @@ describe('evaluateFace quality gates', () => {
 
   it('flags off-angle pose (yaw)', () => {
     const r = evaluateFace({
-      faces: [makeFace({yawAngle: 45})],
+      faces: [makeFace({yawAngle: 55})],
       frameWidth: FRAME_W,
       brightness: goodBrightness,
     });
@@ -54,7 +54,7 @@ describe('evaluateFace quality gates', () => {
 
   it('flags off-angle pose (pitch)', () => {
     const r = evaluateFace({
-      faces: [makeFace({pitchAngle: -40})],
+      faces: [makeFace({pitchAngle: -52})],
       frameWidth: FRAME_W,
       brightness: goodBrightness,
     });
@@ -74,7 +74,7 @@ describe('evaluateFace quality gates', () => {
     const r = evaluateFace({
       faces: [makeFace()],
       frameWidth: FRAME_W,
-      brightness: 250,
+      brightness: 254,
     });
     expect(r.status).toBe('too_bright');
   });
@@ -84,6 +84,24 @@ describe('evaluateFace quality gates', () => {
       faces: [makeFace()],
       frameWidth: FRAME_W,
       brightness: goodBrightness,
+    });
+    expect(r.status).toBe('ok');
+    expect(r.ready).toBe(true);
+  });
+
+  // The loosened gate must turn "ready" for realistic, slightly-imperfect faces
+  // so hands-free auto-capture actually fires in the field.
+  it('is ready for a moderately angled, dim-but-lit, slightly small face', () => {
+    const r = evaluateFace({
+      faces: [
+        makeFace({
+          yawAngle: 40, // < 45
+          pitchAngle: -42, // < 45
+          bounds: {x: 0, y: 0, width: 95, height: 120}, // ratio 0.095 > 0.09
+        }),
+      ],
+      frameWidth: FRAME_W,
+      brightness: 30, // > 25 (dim room)
     });
     expect(r.status).toBe('ok');
     expect(r.ready).toBe(true);
