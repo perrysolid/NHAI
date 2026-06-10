@@ -280,6 +280,15 @@ export default function CameraScreen(): React.JSX.Element {
         };
         const recogSize = RECOGNITION_MODELS[ACTIVE_RECOGNITION].inputSize;
         const liveSize = LIVENESS_MODEL.inputSize;
+        const recogPixels = recogSize * recogSize;
+        const livePixels = liveSize * liveSize;
+        // Accept a buffer only when it has whole-pixel RGB(A) data — never an
+        // empty buffer (the "got 0" failure on some devices). preprocessRgb
+        // tolerates an extra alpha channel, so accept >= 3 channels.
+        const okLen = (len: number, pixels: number): boolean => {
+          'worklet';
+          return len >= pixels * 3 && len % pixels === 0;
+        };
 
         let recognitionRgb: Uint8Array | undefined;
         let livenessRgb: Uint8Array | undefined;
@@ -296,36 +305,37 @@ export default function CameraScreen(): React.JSX.Element {
             crop = fc;
           }
         }
-        try {
-          recognitionRgb = resize(frame, {
-            scale: {width: recogSize, height: recogSize},
-            crop,
-            pixelFormat: 'rgb',
-            dataType: 'uint8',
-          }) as Uint8Array;
-          livenessRgb = resize(frame, {
-            scale: {width: liveSize, height: liveSize},
-            crop,
-            pixelFormat: 'rgb',
-            dataType: 'uint8',
-          }) as Uint8Array;
-        } catch {
+        // Try the face crop, then a guaranteed in-bounds centered crop. Keep the
+        // first attempt that yields valid-length tensors for BOTH models.
+        for (let i = 0; i < 2 && !recognitionRgb; i++) {
+          const c = i === 0 ? crop : centerCrop;
+          let rec: Uint8Array | undefined;
+          let liv: Uint8Array | undefined;
           try {
-            recognitionRgb = resize(frame, {
+            rec = resize(frame, {
               scale: {width: recogSize, height: recogSize},
-              crop: centerCrop,
+              crop: c,
               pixelFormat: 'rgb',
               dataType: 'uint8',
             }) as Uint8Array;
-            livenessRgb = resize(frame, {
+            liv = resize(frame, {
               scale: {width: liveSize, height: liveSize},
-              crop: centerCrop,
+              crop: c,
               pixelFormat: 'rgb',
               dataType: 'uint8',
             }) as Uint8Array;
           } catch {
-            recognitionRgb = undefined;
-            livenessRgb = undefined;
+            rec = undefined;
+            liv = undefined;
+          }
+          if (
+            rec &&
+            liv &&
+            okLen(rec.length, recogPixels) &&
+            okLen(liv.length, livePixels)
+          ) {
+            recognitionRgb = rec;
+            livenessRgb = liv;
           }
         }
         onSignals(faces, frame.width, brightness, recognitionRgb, livenessRgb);
@@ -729,6 +739,10 @@ export default function CameraScreen(): React.JSX.Element {
           style={StyleSheet.absoluteFill}
           device={device}
           isActive={true}
+          // Force a CPU-readable frame format. Without this, some devices hand
+          // the resize plugin a private/native GPU buffer it can't read, so it
+          // returns an empty buffer -> "Expected 37632 RGB bytes, got 0".
+          pixelFormat="yuv"
           frameProcessor={frameProcessor}
         />
         <GuidanceOverlay gate={gate} />
