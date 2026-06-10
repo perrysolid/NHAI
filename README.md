@@ -23,8 +23,10 @@
 ## Judges flow (NHAI Hackathon 7.0)
 
 1. **Install** the offline APK on any Android 8+ phone — [download](https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk) (`adb install -r ...universal-release.apk`).
-2. **Enroll** — tap *Enroll*, enter or generate an inspector ID, hold your face in the circle. Samples auto-capture and the template is saved **on the phone**.
-3. **Verify** — tap *Verify* and complete the random liveness prompts (**blink / smile / turn**, random order). Match returns in **< 1s**, with an authentication score — all on-device.
+2. **Enroll** — tap *Enroll*, enter or generate an inspector ID, then just **center your face in the ring**. It turns **green** the moment your face is centered and all 3 samples **auto-capture** — no buttons to press — saving the template **on the phone**.
+3. **Verify** — tap *Verify* and **center your face**; verification **starts automatically** (no tap). Complete the random liveness prompts (**blink / smile / turn**, random order). Match returns in **< 1s**, with an authentication score — all on-device.
+
+> **Fully hands-free.** Capture and verification trigger automatically once your face is centred (the ring turns green) — you never tap a capture/verify button. The on-screen *Capture* / *Start verify* buttons remain only as a manual fallback.
 4. **Spoof test** — hold up a **photo or a video on another phone**: liveness is **rejected** (it can't complete the live random sequence).
 5. **Offline proof** — turn on **airplane mode** and repeat steps 2–3: enrolment and verification still work; nothing leaves the device.
 6. **No install?** Open the [browser demo](https://nhai-three.vercel.app) to try the same pipeline instantly. *(Demonstration only; the APK is the deliverable.)*
