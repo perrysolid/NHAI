@@ -18,7 +18,7 @@ describe('syncClient', () => {
       livenessPassed: true,
       matchScore: 0.9,
     });
-    expect(payload.records[0].matchDistance).toBe(0.9);
+    expect(payload.records[0].matchDistance).toBeCloseTo(0.1, 6);
   });
 
   it('mock sync purges pending queue', async () => {
