@@ -76,8 +76,13 @@ app.post('/api/sync', apiKeyGuard, async (req, res) => {
     return;
   }
   try {
-    const accepted = await store.add(records);
-    res.json({ok: true, accepted, received: records.length});
+    const acceptedRecords = await store.add(records);
+    res.json({
+      ok: true,
+      accepted: acceptedRecords.length,
+      received: records.length,
+      acceptedRecords,
+    });
   } catch (e) {
     res
       .status(500)

@@ -1,6 +1,12 @@
 import {FLAGS, SYNC} from '../config';
 import type {AttendanceRecord, OfflineAuthStore} from '../auth/offlineStore';
 
+interface SyncAckRecord {
+  userId: string;
+  timestamp: number;
+  deviceId: string;
+}
+
 export interface SyncOutcome {
   ok: boolean;
   accepted: number;
@@ -75,12 +81,20 @@ export async function syncPending(
         error: `HTTP ${res.status}`,
       };
     }
-    const data = (await res.json().catch(() => ({}))) as {accepted?: number};
-    store.purge(pending);
+    const data = (await res.json().catch(() => ({}))) as {
+      accepted?: number;
+      acceptedRecords?: SyncAckRecord[];
+    };
+    const acceptedRecords = Array.isArray(data.acceptedRecords)
+      ? data.acceptedRecords
+      : [];
+    if (acceptedRecords.length > 0) {
+      store.purge(acceptedRecords as AttendanceRecord[]);
+    }
     return {
       ok: true,
       accepted: data.accepted ?? pending.length,
-      purged: pending.length,
+      purged: acceptedRecords.length,
       mocked: false,
     };
   } catch (e) {

@@ -12,6 +12,12 @@ import {
   type AttendanceRecord,
 } from './storage';
 
+interface SyncAckRecord {
+  userId: string;
+  timestamp: number;
+  deviceId: string;
+}
+
 export interface SyncOutcome {
   ok: boolean;
   accepted: number;
@@ -50,8 +56,13 @@ export async function syncPending(
         error: `HTTP ${res.status}`,
       };
     }
-    const data = (await res.json()) as {accepted?: number};
-    purgeSynced(pending);
+    const data = (await res.json()) as {
+      accepted?: number;
+      acceptedRecords?: SyncAckRecord[];
+    };
+    if (Array.isArray(data.acceptedRecords) && data.acceptedRecords.length > 0) {
+      purgeSynced(data.acceptedRecords as AttendanceRecord[]);
+    }
     return {
       ok: true,
       accepted: data.accepted ?? pending.length,

@@ -43,7 +43,7 @@ function optNum(v: unknown): number | undefined {
 
 export interface Store {
   init(): Promise<void>;
-  add(records: AttendanceRecord[]): Promise<number>;
+  add(records: AttendanceRecord[]): Promise<AttendanceRecord[]>;
   list(limit: number, since?: number): Promise<AttendanceRecord[]>;
   kind: 'postgres' | 'memory';
 }
@@ -116,14 +116,14 @@ class MemoryStore implements Store {
 
   async init(): Promise<void> {}
 
-  async add(records: AttendanceRecord[]): Promise<number> {
-    let accepted = 0;
+  async add(records: AttendanceRecord[]): Promise<AttendanceRecord[]> {
+    const accepted: AttendanceRecord[] = [];
     for (const r of records) {
       const k = keyOf(r);
       if (!this.seen.has(k)) {
         this.seen.add(k);
         this.rows.push(r);
-        accepted++;
+        accepted.push(r);
       }
     }
     return accepted;
@@ -180,8 +180,8 @@ class PostgresStore implements Store {
     }
   }
 
-  async add(records: AttendanceRecord[]): Promise<number> {
-    let accepted = 0;
+  async add(records: AttendanceRecord[]): Promise<AttendanceRecord[]> {
+    const accepted: AttendanceRecord[] = [];
     for (const r of records) {
       const res = await this.pool.query(
         `INSERT INTO attendance (user_id, ts, device_id, liveness_passed, match_distance, confidence, score, latency_ms, metrics)
@@ -195,11 +195,13 @@ class PostgresStore implements Store {
           r.matchDistance,
           r.confidence ?? null,
           r.score ?? null,
-          r.latencyMs ?? null,
-          r.inspection ? JSON.stringify(r.inspection) : null,
-        ],
+        r.latencyMs ?? null,
+        r.inspection ? JSON.stringify(r.inspection) : null,
+      ],
       );
-      accepted += res.rowCount ?? 0;
+      if ((res.rowCount ?? 0) > 0) {
+        accepted.push(r);
+      }
     }
     return accepted;
   }

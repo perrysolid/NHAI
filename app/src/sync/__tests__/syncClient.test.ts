@@ -17,8 +17,8 @@ describe('syncClient', () => {
       userId: 'u1',
       livenessPassed: true,
       matchScore: 0.9,
-      matchDistance: 0.9,
     });
+    expect(payload.records[0].matchDistance).toBe(0.9);
   });
 
   it('mock sync purges pending queue', async () => {
@@ -33,5 +33,41 @@ describe('syncClient', () => {
     expect(out.ok).toBe(true);
     expect(out.purged).toBe(1);
     expect(store.getPendingQueue()).toHaveLength(0);
+  });
+
+  it('purges only records acknowledged by the backend', async () => {
+    const store = new OfflineAuthStore(createMemoryStorage());
+    const first = store.queueAttendance({
+      userId: 'u1',
+      livenessScore: 0.8,
+      matchScore: 0.9,
+      timestamp: 1,
+    });
+    store.queueAttendance({
+      userId: 'u2',
+      livenessScore: 0.8,
+      matchScore: 0.9,
+      timestamp: 2,
+    });
+
+    const out = await syncPending(store, {
+      mock: false,
+      fetchImpl: async () =>
+        ({
+          ok: true,
+          json: async () => ({
+            accepted: 1,
+            acceptedRecords: [
+              {userId: first.userId, timestamp: first.timestamp, deviceId: first.deviceId},
+            ],
+          }),
+        } as any),
+    });
+
+    expect(out.ok).toBe(true);
+    expect(out.accepted).toBe(1);
+    expect(out.purged).toBe(1);
+    expect(store.getPendingQueue()).toHaveLength(1);
+    expect(store.getPendingQueue()[0].userId).toBe('u2');
   });
 });
