@@ -42,6 +42,11 @@ export interface RecognitionSpec {
   std: [number, number, number];
   embeddingLength: number;
   dtype: 'float32' | 'uint8';
+  /** Face-box expansion for the recognition crop. Recognition models want a
+   *  tight, roughly-aligned face; ~1.25x the detector box gives forehead-to-chin
+   *  without background. Never feed a full-frame center-crop — that was the root
+   *  cause of "recognition doesn't match": the model embedded the whole scene. */
+  cropExpansion: number;
 }
 
 export const RECOGNITION_MODELS: Record<RecognitionModelId, RecognitionSpec> = {
@@ -55,6 +60,7 @@ export const RECOGNITION_MODELS: Record<RecognitionModelId, RecognitionSpec> = {
     std: [0.5, 0.5, 0.5],
     embeddingLength: 512,
     dtype: 'float32',
+    cropExpansion: 1.25,
   },
   // MobileFaceNet — bundled compact runnable recognition model. The previous
   // FaceNet-512 option was runnable but ~45 MB, so it is intentionally not
@@ -67,6 +73,7 @@ export const RECOGNITION_MODELS: Record<RecognitionModelId, RecognitionSpec> = {
     std: [0.5, 0.5, 0.5],
     embeddingLength: 192,
     dtype: 'float32',
+    cropExpansion: 1.25,
   },
 };
 
@@ -130,6 +137,9 @@ export const THRESHOLDS = {
   headTurnDeltaDeg: 12,
   /** Enrollment captures averaged into one template. */
   enrollSamples: 3,
+  /** A synced record is flagged livenessPassed when its passive score clears
+   *  this. Kept in config so the device and backend agree on one number. */
+  livenessSyncPass: 0.7,
 } as const;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -156,6 +166,9 @@ export const SCORING = {
     illumination: 0.1,
   },
   reviewBelow: 70,
+  /** Logistic steepness mapping cosine similarity → 0..1 confidence, centred on
+   *  THRESHOLDS.recognitionCosine. Higher = sharper accept/reject transition. */
+  confidenceSteepness: 12,
 } as const;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -163,6 +176,16 @@ export const SCORING = {
 // ────────────────────────────────────────────────────────────────────────────
 export const CAMERA = {
   targetFps: 8, // frame-processor throttle (runAtTargetFps)
+  /** The worklet downscales each frame to this longest-edge (px), preserving the
+   *  full field of view (no center-crop), and hands that one RGB buffer to JS.
+   *  JS then crops the aligned face from it (see camera/faceCrop.ts). Big enough
+   *  that an 80–112 px face crop stays sharp; small enough to stay ~8 fps. */
+  mediumLongEdge: 256,
+  /** Hands-free auto-capture / auto-verify loop cadence and spacing. */
+  autoLoopIntervalMs: 200,
+  autoCaptureCooldownMs: 700,
+  /** Active-liveness challenge polling cadence. */
+  challengeTickMs: 160,
 } as const;
 
 // ────────────────────────────────────────────────────────────────────────────

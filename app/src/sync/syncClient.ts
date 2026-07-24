@@ -1,4 +1,4 @@
-import {FLAGS, SYNC} from '../config';
+import {FLAGS, SYNC, THRESHOLDS} from '../config';
 import type {AttendanceRecord, OfflineAuthStore} from '../auth/offlineStore';
 
 interface SyncAckRecord {
@@ -30,7 +30,7 @@ export function toSyncPayload(records: AttendanceRecord[]): {
     records: records.map(r => ({
       userId: r.userId,
       timestamp: r.timestamp,
-      livenessPassed: r.livenessScore >= 0.7,
+      livenessPassed: r.livenessScore >= THRESHOLDS.livenessSyncPass,
       livenessScore: r.livenessScore,
       matchScore: r.matchScore,
       matchDistance: 1 - r.matchScore,

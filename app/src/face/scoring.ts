@@ -36,7 +36,7 @@ const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 
 /** Map cosine similarity to a 0..1 confidence centred on the match threshold. */
 export function confidenceFromCosine(cosine: number): number {
-  const steepness = 12;
+  const steepness = SCORING.confidenceSteepness;
   return (
     1 / (1 + Math.exp(-steepness * (cosine - THRESHOLDS.recognitionCosine)))
   );

@@ -6,7 +6,7 @@
 
 ![React Native](https://img.shields.io/badge/React_Native-0.74-20232a?style=for-the-badge&logo=react)
 ![Android](https://img.shields.io/badge/Android_8.0+-3ddc84?style=for-the-badge&logo=android&logoColor=white)
-![iOS](https://img.shields.io/badge/iOS_13.4+-000000?style=for-the-badge&logo=apple)
+![iOS](https://img.shields.io/badge/iOS_15.5+-000000?style=for-the-badge&logo=apple)
 ![Offline](https://img.shields.io/badge/Auth-100%25_offline-38e0a5?style=for-the-badge)
 ![Models](https://img.shields.io/badge/Models-~10.7_MB-38e0a5?style=for-the-badge)
 
@@ -105,7 +105,7 @@ Weights live in `config.ts` (`SCORING`) and are identical on native and web (`ap
 | D1b | Sync & purge after network returns | Queue → POST → purge on ack (AWS/Render) | `app/src/sync`, [`backend/`](backend) |
 | D2 | Documentation + benchmarks | Full `docs/` set incl. architecture & methodology | [`docs/`](docs) |
 
-> **Honest validation boundary:** `>95%` accuracy and `<1s` latency are backed by the chosen model architectures and on-device latency instrumentation; final numbers should be measured on a target mid-range device with a representative Indian-demographic set. iOS floor is **13.4** (React Native 0.74's minimum), noted against the spec's iOS 12+. See [`docs/NHAI_HACKATHON_ALIGNMENT.md`](docs/NHAI_HACKATHON_ALIGNMENT.md).
+> **Honest validation boundary:** `>95%` accuracy and `<1s` latency are backed by the chosen model architectures and on-device latency instrumentation; final numbers should be measured on a target mid-range device with a representative Indian-demographic set. iOS floor is **15.5** (required by the on-device ML Kit face detector), noted against the spec's iOS 12+. See [`docs/NHAI_HACKATHON_ALIGNMENT.md`](docs/NHAI_HACKATHON_ALIGNMENT.md).
 
 ## Bonus features (beyond the brief)
 

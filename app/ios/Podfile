@@ -5,7 +5,9 @@ require Pod::Executable.execute_command('node', ['-p',
     {paths: [process.argv[1]]},
   )', __dir__]).strip
 
-platform :ios, min_ios_version_supported
+# Raised from RN 0.74's default (13.4) to 15.5 because GoogleMLKit/FaceDetection
+# (pulled in by react-native-vision-camera-face-detector) requires iOS 15.5+.
+platform :ios, '15.5'
 prepare_react_native_project!
 
 linkage = ENV['USE_FRAMEWORKS']

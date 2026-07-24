@@ -33,14 +33,17 @@ import {Worklets} from 'react-native-worklets-core';
 import {
   ACTIVE_RECOGNITION,
   CAMERA,
+  FLAGS,
   LIVENESS_MODEL,
   RECOGNITION_MODELS,
+  SYNC,
   THRESHOLDS,
 } from '../config';
 import {evaluateFace} from '../camera/qualityGates';
 import {autoFireReady} from '../camera/autoCapture';
 import {meanLuma} from '../camera/frameUtils';
-import type {Face, GateResult} from '../camera/types';
+import {cropFace, scaleBox} from '../camera/faceCrop';
+import type {Face, FaceBounds, GateResult} from '../camera/types';
 import {OfflineAuthStore} from '../auth/offlineStore';
 import {createEncryptedAuthStore} from '../auth/mmkvStore';
 import {
@@ -56,9 +59,11 @@ import {
   ActiveLivenessChallenge,
   evaluateDualLiveness,
   type LivenessSnapshot,
+  type LivenessStatus,
 } from '../face/liveness';
 import {TfliteFaceEngine, preprocessRgb, type FaceEngine} from '../face/engine';
 import {computeComposite, confidenceFromCosine} from '../face/scoring';
+import {syncPending} from '../sync/syncClient';
 import GuidanceOverlay from './GuidanceOverlay';
 
 type Page = 'home' | 'enroll_id' | 'camera';
@@ -68,11 +73,18 @@ type EngineState = 'loading' | 'ready' | 'error';
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
 // Bump alongside android versionName so a screenshot reveals the running build.
-const APP_VERSION = 'v1.6 · build 7';
+const APP_VERSION = 'v1.7 · build 8';
 
-interface LatestTensors {
-  recognition: Uint8Array;
-  liveness: Uint8Array;
+/**
+ * One downscaled full-frame RGB buffer plus the face box already scaled into its
+ * coordinate space. The recognition and liveness crops are cut from this in JS
+ * (camera/faceCrop.ts) at capture time, so the models see an aligned face.
+ */
+interface MediumFrame {
+  rgb: Uint8Array;
+  width: number;
+  height: number;
+  box: FaceBounds;
 }
 
 interface Verdict {
@@ -110,12 +122,13 @@ export default function CameraScreen(): React.JSX.Element {
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   const [liveness, setLiveness] = useState<LivenessSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const store = useMemo<OfflineAuthStore>(() => createEncryptedAuthStore(), []);
   const engineRef = useRef<FaceEngine | null>(null);
   const latestFaceRef = useRef<Face | null>(null);
   const latestBrightnessRef = useRef(0);
-  const latestTensorsRef = useRef<LatestTensors | null>(null);
+  const latestMediumRef = useRef<MediumFrame | null>(null);
   const latestRgbLenRef = useRef(0);
   const enrollSamplesRef = useRef<Float32Array[]>([]);
   const challengeRef = useRef<ActiveLivenessChallenge | null>(null);
@@ -205,19 +218,33 @@ export default function CameraScreen(): React.JSX.Element {
           frameWidth: number,
           brightness: number,
           rgbLen: number,
-          recognitionRgb?: number[],
-          livenessRgb?: number[],
+          mediumRgb?: number[],
+          mediumWidth?: number,
+          mediumHeight?: number,
         ) => {
           const gateResult = evaluateFace({faces, frameWidth, brightness});
           setGate(gateResult);
           latestFaceRef.current = faces.length === 1 ? faces[0] : null;
           latestBrightnessRef.current = brightness;
           latestRgbLenRef.current = rgbLen;
-          if (recognitionRgb && livenessRgb) {
-            latestTensorsRef.current = {
-              recognition: new Uint8Array(recognitionRgb),
-              liveness: new Uint8Array(livenessRgb),
+          if (
+            mediumRgb &&
+            mediumWidth &&
+            mediumHeight &&
+            faces.length === 1 &&
+            frameWidth > 0
+          ) {
+            // The medium buffer is a uniform downscale of the frame, so the same
+            // scale maps the face box (frame coords) into buffer coords.
+            const scale = mediumWidth / frameWidth;
+            latestMediumRef.current = {
+              rgb: new Uint8Array(mediumRgb),
+              width: mediumWidth,
+              height: mediumHeight,
+              box: scaleBox(faces[0].bounds, scale),
             };
+          } else if (faces.length !== 1) {
+            latestMediumRef.current = null;
           }
         },
       ),
@@ -250,67 +277,53 @@ export default function CameraScreen(): React.JSX.Element {
           brightness = 0;
         }
 
-        const recogSize = RECOGNITION_MODELS[ACTIVE_RECOGNITION].inputSize;
-        const liveSize = LIVENESS_MODEL.inputSize;
-        const recogPixels = recogSize * recogSize;
-        const livePixels = liveSize * liveSize;
-        // Accept a buffer only when it has whole-pixel RGB(A) data — never an
-        // empty buffer (the "got 0" failure). preprocessRgb tolerates an extra
-        // alpha channel, so accept >= 3 channels.
-        const okLen = (len: number, pixels: number): boolean => {
-          'worklet';
-          return len >= pixels * 3 && len % pixels === 0;
-        };
+        // Downscale the WHOLE frame once (no crop), preserving the full field of
+        // view, and hand that single RGB buffer to JS. JS crops the aligned face
+        // from it (camera/faceCrop.ts). We deliberately never pass the plugin's
+        // `crop` option: on Android it is applied in the rotated sensor buffer,
+        // so a crop from frame/face coords lands out of bounds and the plugin
+        // returns an EMPTY buffer ("got 0"). A plain full-frame downscale is the
+        // code path that is reliable on real devices.
+        const longEdge = Math.max(frame.width, frame.height);
+        const s = longEdge > 0 ? CAMERA.mediumLongEdge / longEdge : 1;
+        const mw = Math.max(1, Math.round(frame.width * s));
+        const mh = Math.max(1, Math.round(frame.height * s));
+        const mediumPixels = mw * mh;
 
-        let recognitionRgb: number[] | undefined;
-        let livenessRgb: number[] | undefined;
+        let mediumRgb: number[] | undefined;
+        let mediumWidth: number | undefined;
+        let mediumHeight: number | undefined;
         let rgbLen = 0; // diagnostic: raw resize length seen in the worklet
 
-        // Only build model tensors when exactly one face is present (capture
-        // needs one). IMPORTANT: do NOT pass a manual `crop` — on Android the
-        // plugin applies it in the rotated sensor buffer space, so a crop from
-        // frame dims / face bbox lands out of bounds and the plugin returns an
-        // EMPTY buffer ("got 0"). The default no-crop path does an
-        // orientation-safe center-crop (same path the brightness resize uses
-        // reliably); the quality gate keeps the face centered.
+        // Only build the medium buffer when exactly one face is present (capture
+        // needs one face box to crop against).
         if (faces.length === 1) {
           try {
-            const rec = resize(frame, {
-              scale: {width: recogSize, height: recogSize},
+            const med = resize(frame, {
+              scale: {width: mw, height: mh},
               pixelFormat: 'rgb',
               dataType: 'uint8',
             }) as Uint8Array;
-            const liv = resize(frame, {
-              scale: {width: liveSize, height: liveSize},
-              pixelFormat: 'rgb',
-              dataType: 'uint8',
-            }) as Uint8Array;
-            rgbLen = rec ? rec.length : 0;
+            rgbLen = med ? med.length : 0;
             if (
-              rec &&
-              liv &&
-              okLen(rec.length, recogPixels) &&
-              okLen(liv.length, livePixels)
+              med &&
+              med.length >= mediumPixels * 3 &&
+              med.length % mediumPixels === 0
             ) {
               // Materialize to plain number[] IN THE WORKLET. worklets-core
               // serializes plain arrays across the JS boundary reliably, whereas
               // a (Shared/Uint8)Array arrives EMPTY on the JS thread — the
-              // observed rgb=37632 but tns=0 failure on real devices. Explicit
-              // pre-sized loops avoid relying on Array.from in the worklet.
-              const recArr: number[] = new Array(rec.length);
-              for (let k = 0; k < rec.length; k++) {
-                recArr[k] = rec[k];
+              // observed rgb>0 but tns=0 failure on real devices.
+              const arr: number[] = new Array(med.length);
+              for (let k = 0; k < med.length; k++) {
+                arr[k] = med[k];
               }
-              const livArr: number[] = new Array(liv.length);
-              for (let k = 0; k < liv.length; k++) {
-                livArr[k] = liv[k];
-              }
-              recognitionRgb = recArr;
-              livenessRgb = livArr;
+              mediumRgb = arr;
+              mediumWidth = mw;
+              mediumHeight = mh;
             }
           } catch {
-            recognitionRgb = undefined;
-            livenessRgb = undefined;
+            mediumRgb = undefined;
           }
         }
         onSignals(
@@ -318,8 +331,9 @@ export default function CameraScreen(): React.JSX.Element {
           frame.width,
           brightness,
           rgbLen,
-          recognitionRgb,
-          livenessRgb,
+          mediumRgb,
+          mediumWidth,
+          mediumHeight,
         );
       });
     },
@@ -382,16 +396,16 @@ export default function CameraScreen(): React.JSX.Element {
 
   const captureEmbedding = useCallback(async (): Promise<Float32Array> => {
     const engine = engineRef.current;
-    const tensors = latestTensorsRef.current;
+    const medium = latestMediumRef.current;
     if (!engine || engineState !== 'ready') {
       throw new Error('Models are still loading');
     }
-    // Capture needs a detected face and a valid crop — not the strict quality
-    // gate (which is advisory). Keeps enrollment/verification unblocked.
+    // Capture needs a detected face and a valid frame buffer — not the strict
+    // quality gate (which is advisory). Keeps enrollment/verification unblocked.
     if (!latestFaceRef.current) {
       throw new Error(pick(GATE_TEXT.no_face));
     }
-    if (!tensors) {
+    if (!medium) {
       // Diagnostic: rgb=0 means the resize plugin returned an empty buffer on
       // this device; rgb>0 means a transfer/storage issue.
       throw new Error(
@@ -399,7 +413,15 @@ export default function CameraScreen(): React.JSX.Element {
       );
     }
     const spec = RECOGNITION_MODELS[ACTIVE_RECOGNITION];
-    return engine.embedFace(preprocessRgb(tensors.recognition, spec));
+    const crop = cropFace({
+      rgb: medium.rgb,
+      width: medium.width,
+      height: medium.height,
+      box: medium.box,
+      expansion: spec.cropExpansion,
+      targetSize: spec.inputSize,
+    });
+    return engine.embedFace(preprocessRgb(crop, spec));
   }, [engineState]);
 
   const onCaptureEnroll = useCallback(async () => {
@@ -457,7 +479,7 @@ export default function CameraScreen(): React.JSX.Element {
         !autoFireReady({
           now,
           lastAt: lastAutoRef.current,
-          cooldownMs: 700,
+          cooldownMs: CAMERA.autoCaptureCooldownMs,
           blocked: busyRef.current,
           gateReady: gateReadyRef.current,
         })
@@ -466,7 +488,7 @@ export default function CameraScreen(): React.JSX.Element {
       }
       lastAutoRef.current = now;
       onCaptureEnroll().catch(() => undefined);
-    }, 200);
+    }, CAMERA.autoLoopIntervalMs);
     return () => clearInterval(id);
   }, [page, mode, engineState, onCaptureEnroll]);
 
@@ -485,105 +507,106 @@ export default function CameraScreen(): React.JSX.Element {
     setVerdict(null);
   }, [store]);
 
-  const runVerify = useCallback(async () => {
-    const engine = engineRef.current;
-    const tensors = latestTensorsRef.current;
-    const face = latestFaceRef.current;
-    if (!engine || !tensors || !face) {
-      throw new Error('Face frame unavailable');
-    }
-    const t0 = Date.now();
-    const recognitionSpec = RECOGNITION_MODELS[ACTIVE_RECOGNITION];
-    const [probe, passiveScore] = await Promise.all([
-      engine.embedFace(preprocessRgb(tensors.recognition, recognitionSpec)),
-      engine.scoreLive(preprocessRgb(tensors.liveness, LIVENESS_MODEL)),
-    ]);
-    const verify = store.verify(probe);
-    const live = evaluateDualLiveness({
-      passiveScore,
-      activeStatus: 'passed',
-    });
-    const confidence = confidenceFromCosine(Math.max(0, verify.matchScore));
-    const composite = computeComposite({
-      recognitionConfidence: confidence,
-      livenessPassed: live.passed,
-      drowsy: false,
-      lookingAway: Math.abs(face.yawAngle) > THRESHOLDS.maxYawDeg,
-      ear:
-        ((face.leftEyeOpenProbability ?? 1) +
-          (face.rightEyeOpenProbability ?? 1)) /
-        2,
-      yawDeg: face.yawAngle,
-      pitchDeg: face.pitchAngle,
-      brightness: latestBrightnessRef.current,
-    });
-    const latencyMs = Date.now() - t0;
-    if (!live.passed) {
+  const runVerify = useCallback(
+    async (activeStatus: LivenessStatus) => {
+      const engine = engineRef.current;
+      const medium = latestMediumRef.current;
+      const face = latestFaceRef.current;
+      if (!engine || !medium || !face) {
+        throw new Error('Face frame unavailable');
+      }
+      const t0 = Date.now();
+      const recognitionSpec = RECOGNITION_MODELS[ACTIVE_RECOGNITION];
+      const recognitionCrop = cropFace({
+        rgb: medium.rgb,
+        width: medium.width,
+        height: medium.height,
+        box: medium.box,
+        expansion: recognitionSpec.cropExpansion,
+        targetSize: recognitionSpec.inputSize,
+      });
+      const livenessCrop = cropFace({
+        rgb: medium.rgb,
+        width: medium.width,
+        height: medium.height,
+        box: medium.box,
+        expansion: LIVENESS_MODEL.bboxExpansion,
+        targetSize: LIVENESS_MODEL.inputSize,
+      });
+      const [probe, passiveScore] = await Promise.all([
+        engine.embedFace(preprocessRgb(recognitionCrop, recognitionSpec)),
+        engine.scoreLive(preprocessRgb(livenessCrop, LIVENESS_MODEL)),
+      ]);
+      const verify = store.verify(probe);
+      const live = evaluateDualLiveness({passiveScore, activeStatus});
+      const confidence = confidenceFromCosine(Math.max(0, verify.matchScore));
+      const composite = computeComposite({
+        recognitionConfidence: confidence,
+        livenessPassed: live.passed,
+        drowsy: false,
+        lookingAway: Math.abs(face.yawAngle) > THRESHOLDS.maxYawDeg,
+        ear:
+          ((face.leftEyeOpenProbability ?? 1) +
+            (face.rightEyeOpenProbability ?? 1)) /
+          2,
+        yawDeg: face.yawAngle,
+        pitchDeg: face.pitchAngle,
+        brightness: latestBrightnessRef.current,
+      });
+      const latencyMs = Date.now() - t0;
+      if (!live.passed) {
+        store.queueAttendance({
+          userId: userId.trim() || 'unidentified',
+          livenessScore: passiveScore,
+          matchScore: verify.matchScore,
+        });
+        refreshCounts();
+        setVerdict({
+          ok: false,
+          title: 'Liveness blocked',
+          detail: `Passive score ${(passiveScore * 100).toFixed(0)}%`,
+          score: composite.overall,
+          latencyMs,
+        });
+        return;
+      }
+      if (!verify.ok || !verify.userId) {
+        setVerdict({
+          ok: false,
+          title: 'No match',
+          detail: `Best score ${(Math.max(0, verify.matchScore) * 100).toFixed(
+            0,
+          )}%`,
+          score: composite.overall,
+          latencyMs,
+        });
+        return;
+      }
       store.queueAttendance({
-        userId: userId.trim() || 'unidentified',
-        livenessScore: passiveScore,
+        userId: verify.userId,
+        livenessScore: live.passed
+          ? Math.max(passiveScore, THRESHOLDS.livenessPassive)
+          : passiveScore,
         matchScore: verify.matchScore,
       });
       refreshCounts();
       setVerdict({
-        ok: false,
-        title: 'Liveness blocked',
-        detail: `Passive score ${(passiveScore * 100).toFixed(0)}%`,
+        ok: true,
+        title: composite.lowTrust ? 'Matched · review' : 'Matched offline',
+        detail: `${verify.userId} · score ${composite.overall}/100`,
         score: composite.overall,
         latencyMs,
       });
-      return;
-    }
-    if (!verify.ok || !verify.userId) {
-      setVerdict({
-        ok: false,
-        title: 'No match',
-        detail: `Best score ${(Math.max(0, verify.matchScore) * 100).toFixed(
-          0,
-        )}%`,
-        score: composite.overall,
-        latencyMs,
-      });
-      return;
-    }
-    store.queueAttendance({
-      userId: verify.userId,
-      livenessScore: live.passed
-        ? Math.max(passiveScore, THRESHOLDS.livenessPassive)
-        : passiveScore,
-      matchScore: verify.matchScore,
-    });
-    refreshCounts();
-    setVerdict({
-      ok: true,
-      title: composite.lowTrust ? 'Matched · review' : 'Matched offline',
-      detail: `${verify.userId} · score ${composite.overall}/100`,
-      score: composite.overall,
-      latencyMs,
-    });
-  }, [refreshCounts, store, userId]);
+    },
+    [refreshCounts, store, userId],
+  );
 
-  const autoVerify = useCallback(() => {
-    if (busyRef.current) {
-      return;
-    }
-    setBusy(true);
-    runVerify()
-      .catch((e: unknown) =>
-        setVerdict({
-          ok: false,
-          title: 'Verify failed',
-          detail: e instanceof Error ? e.message : 'Try again',
-        }),
-      )
-      .finally(() => setBusy(false));
-  }, [runVerify]);
-
-  // Autonomous verification — fully hands-free. As soon as the face is centered
-  // it runs passive anti-spoof + match (no blink/smile/turn gesture needed).
-  // Fires once per presentation: it re-arms only after the face leaves the ring,
-  // so a result never loops. The active-liveness challenge stays on the manual
-  // "Start liveness + verify" button for anyone who wants to demo it.
+  // Autonomous verification — hands-free to START, but liveness is mandatory.
+  // As soon as the face is centered the randomized blink/smile/turn challenge
+  // begins automatically; the challenge loop below runs recognition + passive
+  // anti-spoof only after it passes. This closes the spoof hole where a photo
+  // held to the camera could match with no liveness check. Fires once per
+  // presentation: it re-arms only after the face leaves the ring.
   useEffect(() => {
     if (page !== 'camera' || mode !== 'verify' || engineState !== 'ready') {
       return;
@@ -601,10 +624,10 @@ export default function CameraScreen(): React.JSX.Element {
         return;
       }
       verifyArmedRef.current = false;
-      autoVerify();
-    }, 200);
+      startVerify();
+    }, CAMERA.autoLoopIntervalMs);
     return () => clearInterval(id);
-  }, [page, mode, engineState, autoVerify]);
+  }, [page, mode, engineState, startVerify]);
 
   useEffect(() => {
     if (mode !== 'verify' || !liveness || liveness.status !== 'running') {
@@ -626,7 +649,7 @@ export default function CameraScreen(): React.JSX.Element {
       }
       if (snap.status === 'passed') {
         setBusy(true);
-        runVerify()
+        runVerify('passed')
           .catch((e: unknown) => {
             setVerdict({
               ok: false,
@@ -653,9 +676,43 @@ export default function CameraScreen(): React.JSX.Element {
         });
         challengeRef.current = null;
       }
-    }, 160);
+    }, CAMERA.challengeTickMs);
     return () => clearInterval(id);
   }, [liveness, mode, refreshCounts, runVerify, store, userId, voice]);
+
+  // Offline → online sync. Pushes the local queue to the AWS/Render backend and
+  // purges only the records the server acknowledges. In MOCK_MODE it simulates a
+  // 200 so the queue-purge lifecycle is demoable before a backend is reachable.
+  const onSync = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const outcome = await syncPending(store, {
+        mock: FLAGS.MOCK_MODE,
+        url: SYNC.url,
+        apiKey: SYNC.apiKey,
+      });
+      refreshCounts();
+      if (outcome.ok) {
+        setVerdict({
+          ok: true,
+          title: outcome.mocked
+            ? 'Synced (mock) · queue purged'
+            : 'Synced to server · queue purged',
+          detail: `${outcome.purged} record${
+            outcome.purged === 1 ? '' : 's'
+          } uploaded${outcome.mocked ? ' — MOCK_MODE, no network' : ''}`,
+        });
+      } else {
+        setVerdict({
+          ok: false,
+          title: 'Sync failed',
+          detail: outcome.error ?? 'Could not reach the sync server',
+        });
+      }
+    } finally {
+      setSyncing(false);
+    }
+  }, [refreshCounts, store]);
 
   const onClearLocal = useCallback(() => {
     store.clearAll();
@@ -675,8 +732,10 @@ export default function CameraScreen(): React.JSX.Element {
         enrolled={enrolled}
         pending={pending}
         verdict={verdict}
+        syncing={syncing}
         onEnroll={openEnrollSetup}
         onVerify={openVerifyCamera}
+        onSync={onSync}
         onReset={onClearLocal}
       />
     );
@@ -790,7 +849,7 @@ export default function CameraScreen(): React.JSX.Element {
               ? gate.ready
                 ? mode === 'enroll'
                   ? 'Face detected — capturing automatically. Hold steady.'
-                  : 'Face detected — verifying automatically. Hold steady.'
+                  : 'Face detected — follow the liveness prompts.'
                 : gate.guidance
               : engineState === 'loading'
               ? 'Loading offline models...'
@@ -877,10 +936,10 @@ export default function CameraScreen(): React.JSX.Element {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Run local verification</Text>
             <Text style={styles.helperText}>
-              Center your face in the ring — verification runs automatically with
-              MiniFASNet passive anti-spoof + MobileFaceNet matching on-device,
-              no gestures needed. Tap below to run the randomized blink / smile /
-              head-turn active-liveness challenge instead.
+              Center your face in the ring — the randomized blink / smile /
+              head-turn liveness challenge starts automatically, then MiniFASNet
+              passive anti-spoof + MobileFaceNet matching run on-device.
+              Liveness is always required, so a photo or replay can't pass.
             </Text>
             <TouchableOpacity
               disabled={busy || engineState !== 'ready'}
@@ -923,15 +982,19 @@ function HomePage({
   enrolled,
   pending,
   verdict,
+  syncing,
   onEnroll,
   onVerify,
+  onSync,
   onReset,
 }: {
   enrolled: number;
   pending: number;
   verdict: Verdict | null;
+  syncing: boolean;
   onEnroll: () => void;
   onVerify: () => void;
+  onSync: () => void;
   onReset: () => void;
 }): React.JSX.Element {
   return (
@@ -957,6 +1020,19 @@ function HomePage({
         <Metric label="Templates" value={String(enrolled)} />
         <Metric label="Local records" value={String(pending)} />
       </View>
+
+      {pending > 0 && (
+        <TouchableOpacity
+          style={[styles.primaryButton, syncing && styles.disabledButton]}
+          onPress={onSync}
+          disabled={syncing}>
+          <Text style={styles.primaryButtonText}>
+            {syncing
+              ? 'Syncing…'
+              : `Sync ${pending} record${pending === 1 ? '' : 's'} & purge`}
+          </Text>
+        </TouchableOpacity>
+      )}
 
       {verdict && (
         <View style={[styles.verdict, verdict.ok && styles.verdictOk]}>
