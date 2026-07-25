@@ -83,3 +83,4 @@ The prototype is ready for physical-device benchmarking. Final claims for
 sub-second recognition+liveness and above-95% accuracy should be measured on
 target mid-range Android/iOS devices with representative Indian demographics
 and outdoor lighting conditions.
+

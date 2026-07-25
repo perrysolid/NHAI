@@ -69,6 +69,22 @@ function inspectionCells(m: InspectionMetrics | undefined): string {
   );
 }
 
+function geofenceCell(r: AttendanceRecord): string {
+  const l = r.location;
+  if (!l) {
+    return '<td class="mono dim">—</td>';
+  }
+  if (l.mocked) {
+    return '<td><span class="chip chip--bad">Mock GPS</span></td>';
+  }
+  if (l.geofencePassed) {
+    return '<td><span class="chip chip--ok">On-site</span></td>';
+  }
+  return `<td><span class="chip chip--warn">Off-site ${Math.round(
+    l.distanceM,
+  )}m</span></td>`;
+}
+
 function flagChips(f: RowFlags): string {
   const chips: string[] = [];
   if (f.drowsy) chips.push('<span class="chip chip--bad">Drowsy</span>');
@@ -166,6 +182,7 @@ export function renderDashboard(
         <td class="mono ${scoreTone}">${typeof r.score === 'number' ? r.score : '—'}</td>
         <td class="mono">${r.matchDistance.toFixed(3)}</td>
         ${inspectionCells(r.inspection)}
+        ${geofenceCell(r)}
         <td>${attack ? '<span class="chip chip--bad">Attack blocked</span>' : flagChips(f)}</td>
         <td class="mono dim">${esc(r.deviceId)}</td>
       </tr>`;
@@ -258,7 +275,7 @@ export function renderDashboard(
       <thead><tr>
         <th>Subject</th><th>Time</th><th>Liveness</th><th>Score</th><th>Distance</th>
         <th>EAR</th><th>PERCLOS</th><th>Blink</th><th>Yaw / Light</th>
-        <th>Inspection</th><th>Device</th>
+        <th>Site / GPS</th><th>Inspection</th><th>Device</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>`

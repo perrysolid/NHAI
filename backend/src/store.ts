@@ -21,6 +21,16 @@ export interface InspectionMetrics {
   brightness: number;
 }
 
+export interface RecordLocation {
+  lat: number;
+  lon: number;
+  accuracyM: number;
+  mocked: boolean;
+  geofencePassed: boolean;
+  siteId?: string;
+  distanceM: number;
+}
+
 export interface AttendanceRecord {
   userId: string;
   timestamp: number;
@@ -31,6 +41,8 @@ export interface AttendanceRecord {
   score?: number;
   latencyMs?: number;
   inspection?: InspectionMetrics;
+  /** On-device geofence summary — present when the device had a GPS fix. */
+  location?: RecordLocation;
 }
 
 function optNum(v: unknown): number | undefined {
@@ -74,6 +86,23 @@ function sanitizeInspection(raw: unknown): InspectionMetrics | undefined {
   };
 }
 
+function sanitizeLocation(o: Record<string, unknown>): RecordLocation | undefined {
+  const lat = optNum(o.lat);
+  const lon = optNum(o.lon);
+  if (lat === undefined || lon === undefined) {
+    return undefined;
+  }
+  return {
+    lat,
+    lon,
+    accuracyM: num(o.accuracyM),
+    mocked: Boolean(o.mocked),
+    geofencePassed: Boolean(o.geofencePassed),
+    siteId: typeof o.siteId === 'string' ? o.siteId.slice(0, 128) : undefined,
+    distanceM: num(o.distanceM),
+  };
+}
+
 function sanitize(r: unknown): AttendanceRecord | null {
   if (typeof r !== 'object' || r === null) {
     return null;
@@ -96,6 +125,7 @@ function sanitize(r: unknown): AttendanceRecord | null {
     score: optNum(o.score),
     latencyMs: optNum(o.latencyMs),
     inspection: sanitizeInspection(o.inspection),
+    location: sanitizeLocation(o),
   };
 }
 
@@ -163,6 +193,7 @@ class PostgresStore implements Store {
         score          REAL,
         latency_ms     INTEGER,
         metrics        JSONB,
+        location       JSONB,
         created_at     TIMESTAMPTZ DEFAULT now(),
         PRIMARY KEY (user_id, ts, device_id)
       );
@@ -173,6 +204,7 @@ class PostgresStore implements Store {
       'score REAL',
       'latency_ms INTEGER',
       'metrics JSONB',
+      'location JSONB',
     ]) {
       await this.pool.query(
         `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS ${col};`,
@@ -184,8 +216,8 @@ class PostgresStore implements Store {
     const accepted: AttendanceRecord[] = [];
     for (const r of records) {
       const res = await this.pool.query(
-        `INSERT INTO attendance (user_id, ts, device_id, liveness_passed, match_distance, confidence, score, latency_ms, metrics)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        `INSERT INTO attendance (user_id, ts, device_id, liveness_passed, match_distance, confidence, score, latency_ms, metrics, location)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
          ON CONFLICT (user_id, ts, device_id) DO NOTHING`,
         [
           r.userId,
@@ -195,9 +227,10 @@ class PostgresStore implements Store {
           r.matchDistance,
           r.confidence ?? null,
           r.score ?? null,
-        r.latencyMs ?? null,
-        r.inspection ? JSON.stringify(r.inspection) : null,
-      ],
+          r.latencyMs ?? null,
+          r.inspection ? JSON.stringify(r.inspection) : null,
+          r.location ? JSON.stringify(r.location) : null,
+        ],
       );
       if ((res.rowCount ?? 0) > 0) {
         accepted.push(r);
@@ -208,7 +241,7 @@ class PostgresStore implements Store {
 
   async list(limit: number, since = 0): Promise<AttendanceRecord[]> {
     const res = await this.pool.query(
-      `SELECT user_id, ts, device_id, liveness_passed, match_distance, confidence, score, latency_ms, metrics
+      `SELECT user_id, ts, device_id, liveness_passed, match_distance, confidence, score, latency_ms, metrics, location
          FROM attendance WHERE ts >= $1
         ORDER BY ts DESC LIMIT $2`,
       [since, limit],
@@ -223,6 +256,14 @@ class PostgresStore implements Store {
       score: optNum(row.score),
       latencyMs: optNum(row.latency_ms),
       inspection: sanitizeInspection(row.metrics),
+      location:
+        row.location != null
+          ? sanitizeLocation(
+              typeof row.location === 'string'
+                ? JSON.parse(row.location)
+                : row.location,
+            )
+          : undefined,
     }));
   }
 }

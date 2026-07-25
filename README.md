@@ -109,6 +109,7 @@ Weights live in `config.ts` (`SCORING`) and are identical on native and web (`ap
 
 ## Bonus features (beyond the brief)
 
+- **On-device geofencing (at-site presence)** — face proves *who* and *live*; a geofenced GPS fix proves *where*. At verify the device checks its location against the assigned site (circle or chainage polygon), rejects **mock/fake-GPS** fixes (`isFromMockProvider`) and low-accuracy reads, and stamps `lat/lon/accuracy/geofencePassed/siteId` onto the record. Fully offline (GPS is satellite-based); the backend re-checks server-side. See `app/src/location/`.
 - **Composite Authentication Score** — weighted, transparent 0–100 trust score across all signals.
 - **On-device drowsiness & attention monitoring** — EAR, PERCLOS, blink rate, micro-sleep, head look-away (no extra model). See [`docs/MONITORING_AND_DASHBOARD.md`](docs/MONITORING_AND_DASHBOARD.md).
 - **Bilingual voice prompts (English + हिन्दी)** — offline Web Speech API on web; static bilingual prompts on native. No translation API, no network.
