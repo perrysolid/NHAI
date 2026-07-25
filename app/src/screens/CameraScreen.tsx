@@ -43,10 +43,7 @@ import {
   THRESHOLDS,
 } from '../config';
 import {evaluateGeofence} from '../location/geofence';
-import {
-  fetchAssignedSites,
-  baseUrlFromSyncUrl,
-} from '../location/provisioning';
+import {fetchAssignedSites, baseUrlFromSyncUrl} from '../location/provisioning';
 import {createLocationProvider} from '../location/locationProvider';
 import type {GeofenceResult, LocationFix} from '../location/types';
 import type {RecordLocation} from '../auth/offlineStore';
@@ -75,6 +72,8 @@ import {
 import {TfliteFaceEngine, preprocessRgb, type FaceEngine} from '../face/engine';
 import {computeComposite, confidenceFromCosine} from '../face/scoring';
 import {syncPending} from '../sync/syncClient';
+import {pushEnrollment} from '../sync/enrollmentClient';
+import {averageEmbeddings} from '../face/math';
 import GuidanceOverlay from './GuidanceOverlay';
 
 type Page = 'home' | 'enroll_id' | 'camera';
@@ -269,7 +268,9 @@ export default function CameraScreen(): React.JSX.Element {
   const enrollSamplesRef = useRef<Float32Array[]>([]);
   // Blink-phase / turn-baseline tracking for whichever enroll step is active;
   // reset (freshEnrollGestureState()) every time enrollStepIndex advances.
-  const enrollGestureRef = useRef<EnrollGestureState>(freshEnrollGestureState());
+  const enrollGestureRef = useRef<EnrollGestureState>(
+    freshEnrollGestureState(),
+  );
   // Always holds the latest onCaptureEnrollStep closure so onSignals (a
   // stable, empty-deps callback) can invoke the current version without being
   // recreated itself — same mirroring pattern as the other *Ref values below.
@@ -723,13 +724,30 @@ export default function CameraScreen(): React.JSX.Element {
       const nextIndex = enrollStepIndex + 1;
       enrollGestureRef.current = freshEnrollGestureState();
       if (nextIndex >= ENROLL_STEPS.length) {
-        store.saveEnrollment(id, enrollSamplesRef.current);
+        const samples = [...enrollSamplesRef.current];
+        store.saveEnrollment(id, samples);
         enrollSamplesRef.current = [];
+        // Best-effort ONLINE enrollment: push the averaged template + details to
+        // the central backend so the admin registry sees this inspector. The
+        // template is already saved locally, so offline verification still works
+        // even if this push fails (no network).
+        try {
+          pushEnrollment({
+            baseUrl: baseUrlFromSyncUrl(SYNC.url),
+            apiKey: SYNC.apiKey,
+            userId: id,
+            embedding: averageEmbeddings(samples),
+            deviceId: store.getDeviceId(),
+            samples: samples.length,
+          }).catch(() => undefined);
+        } catch {
+          /* averaging guard — never block local enrollment */
+        }
         setEnrollStepIndex(nextIndex);
         refreshCounts();
         setVerdict({
           ok: true,
-          title: 'Enrollment saved offline',
+          title: 'Enrollment saved',
           detail: `${id} is ready for verification`,
         });
         // Enrollment's only job is to capture and save — it must not silently
@@ -1272,7 +1290,9 @@ export default function CameraScreen(): React.JSX.Element {
             <Text style={styles.progressText}>
               {enrollComplete
                 ? `All ${ENROLL_STEPS.length} poses captured — saved`
-                : `Step ${enrollStepIndex + 1}/${ENROLL_STEPS.length} — follow each prompt, captures automatically`}
+                : `Step ${enrollStepIndex + 1}/${
+                    ENROLL_STEPS.length
+                  } — follow each prompt, captures automatically`}
             </Text>
             <View style={styles.stepList}>
               {ENROLL_STEPS.map((step, i) => {
@@ -1323,7 +1343,8 @@ export default function CameraScreen(): React.JSX.Element {
   const verifyRunning = liveness?.status === 'running';
   const showingResult = verifyResultTone !== null;
   const overlayText = showingResult
-    ? verdict?.title ?? (verifyResultTone === 'success' ? 'Matched' : 'Not verified')
+    ? verdict?.title ??
+      (verifyResultTone === 'success' ? 'Matched' : 'Not verified')
     : liveness?.guidance || gate.guidance;
   const verifyLabel = showingResult
     ? verifyResultTone === 'success'
@@ -1351,7 +1372,10 @@ export default function CameraScreen(): React.JSX.Element {
           {verifyResultTone === 'success' ? (
             <View style={styles.resultActionsRow}>
               <TouchableOpacity
-                style={[styles.resultActionButton, styles.resultActionSecondary]}
+                style={[
+                  styles.resultActionButton,
+                  styles.resultActionSecondary,
+                ]}
                 onPress={goHome}>
                 <Text style={styles.resultActionSecondaryText}>
                   Return to Home
@@ -1517,7 +1541,9 @@ function EnrollIdPage({
   onBack: () => void;
 }): React.JSX.Element {
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.setupPage}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.setupPage}>
       <TouchableOpacity style={styles.backPill} onPress={onBack}>
         <Text style={styles.backPillText}>BACK</Text>
       </TouchableOpacity>

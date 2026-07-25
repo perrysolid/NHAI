@@ -41,7 +41,20 @@ create table if not exists public.attendance (
 );
 ```
 
-RLS: leave Row-Level Security **enabled** on both tables. The backend uses the
+```sql
+-- Central inspector registry (online enrollment: on-device embedding + details).
+create table if not exists public.enrollments (
+  user_id     text primary key,
+  name        text not null,
+  role        text not null,
+  embedding   jsonb not null,   -- L2-normalized template (192-d / 512-d)
+  device_id   text not null,
+  samples     integer not null,
+  enrolled_at bigint not null
+);
+```
+
+RLS: leave Row-Level Security **enabled** on all tables. The backend uses the
 service_role key, which bypasses RLS, so no client policies are needed while all
 access goes through the Express API.
 

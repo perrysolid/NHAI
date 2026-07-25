@@ -14,11 +14,13 @@ import cors from 'cors';
 import {apiKeyGuard} from './auth.js';
 import {createStore, sanitizeMany} from './store.js';
 import {createSitesStore, sanitizeSite, ROLES} from './sites.js';
+import {createEnrollmentsStore, sanitizeEnrollment} from './enrollments.js';
 import {renderDashboard} from './dashboard.js';
 
 const app = express();
 const store = createStore();
 const sitesStore = createSitesStore();
+const enrollmentsStore = createEnrollmentsStore();
 
 // Tolerate trailing slashes and a comma-separated list of allowed origins, so a
 // stray "https://app.vercel.app/" in CORS_ORIGIN doesn't silently block the SPA.
@@ -148,6 +150,59 @@ app.post('/api/admin/login', (req, res) => {
   }
 });
 
+// ── Enrollment (online) + admin registry ──
+// Device posts an on-device embedding + details; admin sees everyone enrolled;
+// a device can pull a template to verify that inspector offline.
+app.post('/api/enroll', apiKeyGuard, async (req, res) => {
+  const enrollment = sanitizeEnrollment(req.body);
+  if (!enrollment) {
+    res.status(400).json({
+      ok: false,
+      error: 'invalid enrollment: need userId and a non-empty embedding[]',
+    });
+    return;
+  }
+  try {
+    await enrollmentsStore.upsert(enrollment);
+    res.json({
+      ok: true,
+      userId: enrollment.userId,
+      embeddingLength: enrollment.embedding.length,
+    });
+  } catch (e) {
+    res.status(500).json({ok: false, error: e instanceof Error ? e.message : 'db error'});
+  }
+});
+
+app.get('/api/enrollments', apiKeyGuard, async (_req, res) => {
+  try {
+    res.json({ok: true, enrollments: await enrollmentsStore.list()});
+  } catch (e) {
+    res.status(500).json({ok: false, error: e instanceof Error ? e.message : 'db error'});
+  }
+});
+
+app.get('/api/enrollments/for/:userId', apiKeyGuard, async (req, res) => {
+  try {
+    const enrollment = await enrollmentsStore.get(req.params.userId);
+    if (!enrollment) {
+      res.status(404).json({ok: false, error: 'not enrolled'});
+      return;
+    }
+    res.json({ok: true, enrollment});
+  } catch (e) {
+    res.status(500).json({ok: false, error: e instanceof Error ? e.message : 'db error'});
+  }
+});
+
+app.delete('/api/enrollments/:userId', apiKeyGuard, async (req, res) => {
+  try {
+    res.json({ok: true, deleted: await enrollmentsStore.remove(req.params.userId)});
+  } catch (e) {
+    res.status(500).json({ok: false, error: e instanceof Error ? e.message : 'db error'});
+  }
+});
+
 // ── Geofence sites (admin provisioning + device pull) ──
 // The role list feeds the admin form's dropdown.
 app.get('/api/roles', (_req, res) => {
@@ -217,7 +272,7 @@ app.get('/admin', async (req, res) => {
 });
 
 const port = Number(process.env.PORT) || 4000;
-Promise.all([store.init(), sitesStore.init()])
+Promise.all([store.init(), sitesStore.init(), enrollmentsStore.init()])
   .then(() => {
     app.listen(port, () => {
       // eslint-disable-next-line no-console

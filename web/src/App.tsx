@@ -45,11 +45,12 @@ import StatStrip from './ui/StatStrip';
 import InspectionPanel from './ui/InspectionPanel';
 import ScoreBreakdown from './ui/ScoreBreakdown';
 import GeofencingAdmin from './ui/GeofencingAdmin';
+import InspectorsAdmin from './ui/InspectorsAdmin';
 import AdminLogin from './ui/AdminLogin';
 import {isAuthed, logout} from './lib/adminAuth';
 
 type Mode = 'idle' | 'enrolling' | 'verifying';
-type Page = 'live' | 'operations' | 'deployment' | 'aws' | 'geofencing';
+type Page = 'live' | 'operations' | 'deployment' | 'aws' | 'geofencing' | 'inspectors';
 type ModelState = 'loading' | 'ready' | 'error';
 interface LatencyBudget {
   recognizeMs: number;
@@ -74,9 +75,13 @@ const ROUTES: Record<Page, string> = {
   deployment: '/deployment',
   aws: '/aws',
   geofencing: '/geofencing',
+  inspectors: '/inspectors',
 };
 
 function pageFromPath(pathname: string): Page {
+  if (pathname.startsWith('/inspectors')) {
+    return 'inspectors';
+  }
   if (pathname.startsWith('/aws')) {
     return 'aws';
   }
@@ -544,7 +549,7 @@ export default function App() {
       <AdminLogin
         onLogin={() => {
           setAuthed(true);
-          navigate('geofencing');
+          navigate('inspectors');
         }}
       />
     );
@@ -566,6 +571,12 @@ export default function App() {
         </div>
         <div className="sysmeta">
           <nav className="pagenav" aria-label="Demo pages">
+            <button
+              className={`pagenav__item ${page === 'inspectors' ? 'pagenav__item--active' : ''}`}
+              onClick={() => navigate('inspectors')}
+              data-testid="nav-inspectors">
+              Inspectors
+            </button>
             <button
               className={`pagenav__item ${page === 'live' ? 'pagenav__item--active' : ''}`}
               onClick={() => navigate('live')}
@@ -694,6 +705,8 @@ export default function App() {
       {page === 'aws' && <AwsPage />}
 
       {page === 'geofencing' && <GeofencingAdmin />}
+
+      {page === 'inspectors' && <InspectorsAdmin />}
 
       <footer className="footer">
         <span>On-device inference · no image leaves the browser</span>
