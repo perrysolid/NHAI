@@ -1,16 +1,22 @@
 /**
- * CameraScreen integration test — proves the app is fully hands-free.
+ * CameraScreen integration test — proves capture and verification are each
+ * hands-free once the operator is on their respective screen.
  *
  * We mount the REAL CameraScreen with the native modules mocked, then feed it a
  * good, centered face through the real frame -> quality-gate -> auto-capture
- * pipeline (no taps on any capture/verify button). We assert that:
- *   1. enrollment is saved automatically after the configured samples, and
- *   2. verification then auto-starts, the cycling face satisfies active
- *      liveness, and the result is a Match.
+ * pipeline. No capture or verify button is ever tapped — only the two screen
+ * transitions (Enroll -> camera, then Home -> Verify) are. We assert that:
+ *   1. enrollment auto-captures all 4 guided poses (neutral, smile, blink,
+ *      turn) and the screen returns Home (it must not silently swap into the
+ *      verify UI), and
+ *   2. once the operator explicitly opens Verify, the challenge auto-starts
+ *      asking for all 3 actions (blink/smile/turn) in random order, the
+ *      cycling face satisfies each one, and the result is a Match.
  *
- * The mocked face cycles eye-open / yaw each frame so it satisfies blink, smile
- * and turn in whatever random order the challenge picks, and the mocked TFLite
- * model returns a fixed embedding so the probe self-matches the enrollment.
+ * The mocked face cycles eye-open / yaw each frame so it satisfies blink and
+ * turn (and holds a constant smiling probability so smile is always
+ * satisfied), and the mocked TFLite model returns a fixed embedding so the
+ * probe self-matches the enrollment.
  */
 import React from 'react';
 import TestRenderer, {act} from 'react-test-renderer';
@@ -138,7 +144,7 @@ async function flush(): Promise<void> {
   }
 }
 
-test('hands-free: centered face auto-enrolls, then auto-verifies to a match', async () => {
+test('hands-free capture: centered face auto-enrolls and returns Home', async () => {
   let tree!: TestRenderer.ReactTestRenderer;
   await act(async () => {
     tree = TestRenderer.create(<CameraScreen />);
@@ -150,35 +156,87 @@ test('hands-free: centered face auto-enrolls, then auto-verifies to a match', as
   const root = tree.root;
 
   // Navigate Home -> ID setup -> generate an ID -> camera. (These are the only
-  // taps; capture and verify themselves are never tapped.)
+  // taps; capture itself is never tapped.)
   press(root, 'Enroll');
   press(root, 'Generate ID');
   press(root, 'Continue to camera');
 
-  let enrolledTemplate = false; // Templates stat reached 1 (durable enroll proof)
-  let matched = false; // a verification auto-completed as a match
+  let enrolledTemplate = false; // Templates stat reached 1 on Home (durable enroll proof)
 
-  // Drive the camera for ~10s of mocked frames, sampling the UI as we go. No
-  // capture/verify button is ever pressed — everything below is automatic.
-  for (let elapsed = 0; elapsed < 11000; elapsed += 250) {
+  // Drive the camera for up to ~7s of mocked frames. No capture button is ever
+  // pressed — all 4 poses (neutral, smile, blink, turn) fire automatically off
+  // the centered/cycling face. The enroll screen holds on a "saved"
+  // confirmation for CAMERA.enrollCompleteDelayMs before handing back to Home,
+  // where the Templates stat lives (the enroll screen itself shows no stats),
+  // so this loop also proves that hold happens.
+  for (let elapsed = 0; elapsed < 7000; elapsed += 250) {
     await act(async () => {
       await jest.advanceTimersByTimeAsync(250);
       await flush();
     });
     if (metricValue(root, 'Templates') === '1') {
       enrolledTemplate = true;
-    }
-    if (anyText(root, t => t.startsWith('Matched'))) {
-      matched = true;
-    }
-    if (enrolledTemplate && matched) {
       break;
     }
   }
 
   // Enrollment was saved automatically (3 samples, no taps)...
   expect(enrolledTemplate).toBe(true);
-  // ...then verification auto-started, active liveness passed, and it matched.
+  // ...and enrollment hands off back to Home instead of silently opening the
+  // verify UI on the same screen — proven by the Home-only "Verify" button and
+  // the success banner it carries with it.
+  expect(anyText(root, t => t === 'Verify')).toBe(true);
+  expect(anyText(root, t => t.startsWith('Enrollment saved offline'))).toBe(
+    true,
+  );
+
+  act(() => tree.unmount());
+});
+
+test('hands-free verify: opening Verify auto-runs liveness + matching', async () => {
+  let tree!: TestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = TestRenderer.create(<CameraScreen />);
+  });
+  await act(async () => {
+    await flush();
+    await jest.advanceTimersByTimeAsync(0);
+  });
+  const root = tree.root;
+
+  press(root, 'Enroll');
+  press(root, 'Generate ID');
+  press(root, 'Continue to camera');
+
+  // Waits through capture AND the post-save "Enrollment saved" hold on the
+  // enroll screen (CAMERA.enrollCompleteDelayMs) before Home — and hence the
+  // Templates stat — appears.
+  for (let elapsed = 0; elapsed < 7000; elapsed += 250) {
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(250);
+      await flush();
+    });
+    if (metricValue(root, 'Templates') === '1') {
+      break;
+    }
+  }
+
+  // Back on Home now. Open Verify — the only tap in this phase; the liveness
+  // challenge and the match itself are never tapped.
+  press(root, 'Verify');
+
+  let matched = false;
+  for (let elapsed = 0; elapsed < 11000; elapsed += 250) {
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(250);
+      await flush();
+    });
+    if (anyText(root, t => t.startsWith('Matched'))) {
+      matched = true;
+      break;
+    }
+  }
+
   expect(matched).toBe(true);
 
   act(() => tree.unmount());

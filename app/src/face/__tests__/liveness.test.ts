@@ -18,21 +18,20 @@ const open = face({leftEyeOpenProbability: 1, rightEyeOpenProbability: 1});
 const closed = face({leftEyeOpenProbability: 0, rightEyeOpenProbability: 0});
 
 describe('active liveness (3-layer randomized)', () => {
-  it('defaults to a single motion action (blink or turn) that defeats a photo', () => {
-    const c = new ActiveLivenessChallenge(); // count defaults to livenessActionCount (1)
+  it('defaults to all 3 actions (blink, smile, turn) in random order', () => {
+    const c = new ActiveLivenessChallenge(); // count defaults to livenessActionCount (3)
     const snap = c.start(0);
     expect(snap.challenges).toHaveLength(THRESHOLDS.livenessActionCount);
-    // a single action is always motion-based — never 'smile', which a static
-    // smiling photo could satisfy.
-    for (const step of snap.challenges) {
-      expect(['blink', 'turn']).toContain(step);
-    }
+    expect([...snap.challenges].sort()).toEqual(['blink', 'smile', 'turn']);
   });
 
-  it('supports the full randomized 3-action showcase when asked', () => {
-    const c = new ActiveLivenessChallenge(Math.random, undefined, 3);
+  it('a single-action challenge is always motion-based (blink or turn), never smile alone', () => {
+    // A static smiling photo could satisfy 'smile' with zero motion, so a
+    // 1-action challenge must never pick it.
+    const c = new ActiveLivenessChallenge(Math.random, undefined, 1);
     const snap = c.start(0);
-    expect([...snap.challenges].sort()).toEqual(['blink', 'smile', 'turn']);
+    expect(snap.challenges).toHaveLength(1);
+    expect(['blink', 'turn']).toContain(snap.challenges[0]);
   });
 
   it('passes a blink on a full open-close-open cycle', () => {

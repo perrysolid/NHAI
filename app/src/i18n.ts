@@ -42,3 +42,14 @@ export const LIVENESS_TEXT: Record<string, Pair> = {
   passed: {hi: 'सत्यापित', en: 'Liveness confirmed'},
   failed: {hi: 'विफल, पुनः प्रयास करें', en: 'Liveness failed, retry'},
 };
+
+/** Guided-enrollment step prompts. Shares wording with LIVENESS_TEXT for
+ *  smile/blink/turn so the phrasing at enroll time matches what's asked again
+ *  at verify time. */
+export const ENROLL_STEP_TEXT: Record<string, Pair> = {
+  neutral: {hi: 'सीधा देखें, सामान्य भाव', en: 'Look straight, neutral face'},
+  smile: LIVENESS_TEXT.smile,
+  blink: LIVENESS_TEXT.blink,
+  turn: LIVENESS_TEXT.turn,
+  done: {hi: 'सभी चरण पूरे हुए', en: 'All steps complete'},
+};

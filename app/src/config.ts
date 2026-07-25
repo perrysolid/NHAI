@@ -128,12 +128,15 @@ export const THRESHOLDS = {
   /** Minimum range the eye-open signal must span during a verify attempt — a
    *  real blink swings ~0.8; a held photo stays flat. Defeats static spoofs. */
   livenessMotionRange: 0.2,
-  /** How many random motion actions the verify challenge requires. One clear
-   *  action (blink or head-turn) is reliable AND defeats a static photo; raise
-   *  to 3 for the full randomized blink/smile/turn showcase. */
-  livenessActionCount: 1,
-  /** Active-challenge window per attempt — generous so a real user isn't rushed. */
-  activeChallengeTimeoutMs: 15000,
+  /** How many random motion actions the verify challenge requires, out of
+   *  blink/smile/turn. 3 asks for all of them (in a random order each
+   *  attempt) — matches the poses captured at enrollment (see ENROLL_STEPS in
+   *  screens/CameraScreen.tsx) for a full device-Face-ID-style challenge. */
+  livenessActionCount: 3,
+  /** Active-challenge window — shared across all `livenessActionCount`
+   *  actions in one attempt, so it scales with the count: generous enough
+   *  that a real user isn't rushed even asking for all 3. */
+  activeChallengeTimeoutMs: 30000,
   /** Quality gates — advisory guidance, kept forgiving for field use. Loosened
    *  so the "face centered" ready state (which drives hands-free auto-capture /
    *  auto-verify) triggers readily; only a clear profile, a tiny/distant face,
@@ -149,8 +152,6 @@ export const THRESHOLDS = {
   blinkOpenProb: 0.6,
   smileProb: 0.5,
   headTurnDeltaDeg: 12,
-  /** Enrollment captures averaged into one template. */
-  enrollSamples: 3,
   /** A synced record is flagged livenessPassed when its passive score clears
    *  this. Kept in config so the device and backend agree on one number. */
   livenessSyncPass: 0.7,
@@ -198,8 +199,16 @@ export const CAMERA = {
   /** Hands-free auto-capture / auto-verify loop cadence and spacing. */
   autoLoopIntervalMs: 200,
   autoCaptureCooldownMs: 700,
+  /** How long the "Enrollment saved" confirmation holds on the enroll camera
+   *  screen before returning Home. A well-centered face can complete all 3
+   *  samples in ~2s; without this pause the screen would flash and vanish
+   *  before the operator ever sees a save confirmation. */
+  enrollCompleteDelayMs: 1200,
   /** Active-liveness challenge polling cadence. */
   challengeTickMs: 160,
+  /** How long the verify pass/fail result (big check/cross over the camera)
+   *  holds before clearing back to the idle scanning state. */
+  verifyResultHoldMs: 1800,
 } as const;
 
 // ────────────────────────────────────────────────────────────────────────────
