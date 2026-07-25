@@ -10,6 +10,8 @@
  * trusting these numbers — wrong dtype/shape/normalization is the #1 runtime bug.
  */
 
+import type {Site} from './location/types';
+
 // ────────────────────────────────────────────────────────────────────────────
 // Feature flags
 // ────────────────────────────────────────────────────────────────────────────
@@ -22,6 +24,11 @@ export const FLAGS = {
   USE_LIVE_FRAMES: true,
   /** Verbose per-stage latency logging to Metro console. */
   LOG_LATENCY: true,
+  /** When true, verify also requires the passive MiniFASNet score to clear
+   *  THRESHOLDS.livenessPassive. Left false by default: the passive model isn't
+   *  device-calibrated, so it's recorded but non-blocking to avoid false
+   *  rejects — the active motion challenge carries the anti-spoof guarantee. */
+  REQUIRE_PASSIVE_LIVENESS: false,
 } as const;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -113,14 +120,20 @@ export const LIVENESS_MODEL: LivenessSpec = {
 export const THRESHOLDS = {
   /** Cosine similarity >= this means the same person. */
   recognitionCosine: 0.55,
-  /** Passive anti-spoof "live" probability must exceed this (defense in depth
-   *  against screen/print replays; the mandatory blink defeats static photos). */
+  /** Passive anti-spoof "live" probability must exceed this. Only enforced when
+   *  FLAGS.REQUIRE_PASSIVE_LIVENESS is true; otherwise it is advisory (recorded
+   *  but non-blocking) so an uncalibrated MiniFASNet can't false-reject a real
+   *  face. The active motion challenge is the primary defeat-a-photo mechanism. */
   livenessPassive: 0.5,
   /** Minimum range the eye-open signal must span during a verify attempt — a
    *  real blink swings ~0.8; a held photo stays flat. Defeats static spoofs. */
-  livenessMotionRange: 0.3,
-  /** Active-challenge window (generous so real users complete all 3 actions). */
-  activeChallengeTimeoutMs: 10000,
+  livenessMotionRange: 0.2,
+  /** How many random motion actions the verify challenge requires. One clear
+   *  action (blink or head-turn) is reliable AND defeats a static photo; raise
+   *  to 3 for the full randomized blink/smile/turn showcase. */
+  livenessActionCount: 1,
+  /** Active-challenge window per attempt — generous so a real user isn't rushed. */
+  activeChallengeTimeoutMs: 15000,
   /** Quality gates — advisory guidance, kept forgiving for field use. Loosened
    *  so the "face centered" ready state (which drives hands-free auto-capture /
    *  auto-verify) triggers readily; only a clear profile, a tiny/distant face,
@@ -130,10 +143,11 @@ export const THRESHOLDS = {
   minFaceRatio: 0.09, // face bbox width / frame width
   minBrightness: 25, // mean luma 0..255
   maxBrightness: 252,
-  /** Active-liveness landmark cutoffs (ML Kit probabilities 0..1). */
-  blinkClosedProb: 0.35,
-  blinkOpenProb: 0.65,
-  smileProb: 0.6,
+  /** Active-liveness landmark cutoffs (ML Kit probabilities 0..1). Loosened so a
+   *  natural blink / smile / turn registers reliably on mid-range cameras. */
+  blinkClosedProb: 0.4,
+  blinkOpenProb: 0.6,
+  smileProb: 0.5,
   headTurnDeltaDeg: 12,
   /** Enrollment captures averaged into one template. */
   enrollSamples: 3,
@@ -199,6 +213,44 @@ export const SYNC = {
   batchSize: 50,
 } as const;
 
+// ────────────────────────────────────────────────────────────────────────────
+// Geofencing (on-device "is the worker at the assigned site?"). Fully offline —
+// GPS is satellite-based; the site list lives on the device. NEVER in the auth
+// decision for identity; it's an independent presence signal on the record.
+// ────────────────────────────────────────────────────────────────────────────
+export const GEOFENCE = {
+  /** Reject GPS fixes whose horizontal accuracy radius exceeds this (metres). */
+  maxAccuracyM: 50,
+  /** Fail the geofence when the OS flags the fix as a mock / fake-GPS provider. */
+  rejectMocked: true,
+  /** When true a verify OUTSIDE the geofence (or mocked) is BLOCKED, not just
+   *  flagged. Keep false until SITES holds a real site at your demo location,
+   *  otherwise every verify fails the geofence. */
+  enforce: false,
+  /** getCurrentPosition timeout (ms) and how stale a cached fix may be (ms). */
+  fixTimeoutMs: 8000,
+  maxFixAgeMs: 15000,
+} as const;
+
+/**
+ * Provisioned work sites, stored ON-DEVICE (no network). Replace the demo entry
+ * with the real assigned site(s). For a live demo, set `center` to your current
+ * lat/lon (from Google Maps) and a radius that comfortably covers the room, then
+ * flip GEOFENCE.enforce to true.
+ */
+export const SITES: Site[] = [
+  {
+    id: 'demo-site',
+    name: 'Demo Site',
+    shape: {
+      kind: 'circle',
+      // TODO: set to the demo location's coordinates before enforcing.
+      center: {lat: 28.6139, lon: 77.209},
+      radiusM: 150,
+    },
+  },
+];
+
 export const config = {
   FLAGS,
   ACTIVE_RECOGNITION,
@@ -209,6 +261,8 @@ export const config = {
   SCORING,
   CAMERA,
   SYNC,
+  GEOFENCE,
+  SITES,
 };
 
 export default config;

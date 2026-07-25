@@ -18,6 +18,16 @@ export interface Enrollment {
   samples: number;
 }
 
+export interface RecordLocation {
+  lat: number;
+  lon: number;
+  accuracyM: number;
+  mocked: boolean;
+  geofencePassed: boolean;
+  siteId?: string;
+  distanceM: number;
+}
+
 export interface AttendanceRecord {
   userId: string;
   timestamp: number;
@@ -25,6 +35,8 @@ export interface AttendanceRecord {
   matchScore: number;
   deviceId: string;
   synced: boolean;
+  /** On-device geofence summary — present when a GPS fix was available. */
+  location?: RecordLocation;
 }
 
 export interface VerifyOutcome {
@@ -101,6 +113,7 @@ export class OfflineAuthStore {
     livenessScore: number;
     matchScore: number;
     timestamp?: number;
+    location?: RecordLocation;
   }): AttendanceRecord {
     const record: AttendanceRecord = {
       userId: input.userId,
@@ -109,6 +122,7 @@ export class OfflineAuthStore {
       matchScore: input.matchScore,
       deviceId: this.getDeviceId(),
       synced: false,
+      ...(input.location ? {location: input.location} : {}),
     };
     const queue = this.getQueue();
     queue.push(record);

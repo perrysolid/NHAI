@@ -34,11 +34,17 @@ import {
   ACTIVE_RECOGNITION,
   CAMERA,
   FLAGS,
+  GEOFENCE,
   LIVENESS_MODEL,
   RECOGNITION_MODELS,
+  SITES,
   SYNC,
   THRESHOLDS,
 } from '../config';
+import {evaluateGeofence} from '../location/geofence';
+import {createLocationProvider} from '../location/locationProvider';
+import type {GeofenceResult, LocationFix} from '../location/types';
+import type {RecordLocation} from '../auth/offlineStore';
 import {evaluateFace} from '../camera/qualityGates';
 import {autoFireReady} from '../camera/autoCapture';
 import {meanLuma} from '../camera/frameUtils';
@@ -73,7 +79,7 @@ type EngineState = 'loading' | 'ready' | 'error';
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
 // Bump alongside android versionName so a screenshot reveals the running build.
-const APP_VERSION = 'v1.7 · build 8';
+const APP_VERSION = 'v1.8 · build 9';
 
 /**
  * One downscaled full-frame RGB buffer plus the face box already scaled into its
@@ -105,6 +111,26 @@ function createInspectorId(): string {
   return `inspector_${Date.now().toString(36).slice(-6)}`;
 }
 
+/** Short human summary of a geofence outcome for the verdict line. */
+function geofenceReasonText(geo: GeofenceResult): string {
+  switch (geo.reason) {
+    case 'inside':
+      return `At ${geo.siteName ?? 'site'}`;
+    case 'outside':
+      return `${geo.distanceM} m outside ${geo.siteName ?? 'site'}`;
+    case 'poor_accuracy':
+      return 'GPS accuracy too low';
+    case 'mocked':
+      return 'Mock / fake GPS detected';
+    case 'no_fix':
+      return 'No GPS fix';
+    case 'no_sites':
+      return 'No site configured';
+    default:
+      return 'Location unknown';
+  }
+}
+
 export default function CameraScreen(): React.JSX.Element {
   const {hasPermission, requestPermission} = useCameraPermission();
   const device = useCameraDevice('front');
@@ -125,6 +151,8 @@ export default function CameraScreen(): React.JSX.Element {
   const [syncing, setSyncing] = useState(false);
 
   const store = useMemo<OfflineAuthStore>(() => createEncryptedAuthStore(), []);
+  const locationProvider = useMemo(() => createLocationProvider(), []);
+  const latestFixRef = useRef<LocationFix | null>(null);
   const engineRef = useRef<FaceEngine | null>(null);
   const latestFaceRef = useRef<Face | null>(null);
   const latestBrightnessRef = useRef(0);
@@ -159,6 +187,42 @@ export default function CameraScreen(): React.JSX.Element {
   useEffect(() => {
     setSpeechEnabled(voice);
   }, [voice]);
+
+  // Keep a fresh GPS fix cached while on the camera so verify reads it instantly
+  // (no wait, no inflated latency). Fully offline — GPS needs no network.
+  useEffect(() => {
+    if (page !== 'camera') {
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const refresh = () => {
+      locationProvider
+        .getFix({
+          timeoutMs: GEOFENCE.fixTimeoutMs,
+          maxAgeMs: GEOFENCE.maxFixAgeMs,
+        })
+        .then(fix => {
+          if (!cancelled && fix) {
+            latestFixRef.current = fix;
+          }
+        })
+        .catch(() => undefined);
+    };
+    locationProvider.requestPermission().then(granted => {
+      if (cancelled || !granted) {
+        return;
+      }
+      refresh();
+      timer = setInterval(refresh, GEOFENCE.maxFixAgeMs);
+    });
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearInterval(timer);
+      }
+    };
+  }, [page, locationProvider]);
 
   useEffect(() => {
     if (page === 'camera' && voice && gate.status) {
@@ -538,11 +602,16 @@ export default function CameraScreen(): React.JSX.Element {
         engine.scoreLive(preprocessRgb(livenessCrop, LIVENESS_MODEL)),
       ]);
       const verify = store.verify(probe);
-      const live = evaluateDualLiveness({passiveScore, activeStatus});
+      const dual = evaluateDualLiveness({passiveScore, activeStatus});
+      // Active motion challenge is the hard requirement; the passive MiniFASNet
+      // score is advisory unless REQUIRE_PASSIVE_LIVENESS is on (see config).
+      const livePassed = FLAGS.REQUIRE_PASSIVE_LIVENESS
+        ? dual.passed
+        : dual.activePassed;
       const confidence = confidenceFromCosine(Math.max(0, verify.matchScore));
       const composite = computeComposite({
         recognitionConfidence: confidence,
-        livenessPassed: live.passed,
+        livenessPassed: livePassed,
         drowsy: false,
         lookingAway: Math.abs(face.yawAngle) > THRESHOLDS.maxYawDeg,
         ear:
@@ -554,11 +623,33 @@ export default function CameraScreen(): React.JSX.Element {
         brightness: latestBrightnessRef.current,
       });
       const latencyMs = Date.now() - t0;
-      if (!live.passed) {
+
+      // On-device geofence: is the worker physically at the assigned site? This
+      // reads the cached GPS fix (no wait) and never touches the identity
+      // decision — it's an independent presence signal on the record.
+      const fix = latestFixRef.current;
+      const geo = evaluateGeofence(fix, SITES, {
+        maxAccuracyM: GEOFENCE.maxAccuracyM,
+        rejectMocked: GEOFENCE.rejectMocked,
+      });
+      const location: RecordLocation | undefined = fix
+        ? {
+            lat: fix.lat,
+            lon: fix.lon,
+            accuracyM: fix.accuracyM,
+            mocked: fix.mocked,
+            geofencePassed: geo.passed,
+            siteId: geo.siteId,
+            distanceM: geo.distanceM,
+          }
+        : undefined;
+
+      if (!livePassed) {
         store.queueAttendance({
           userId: userId.trim() || 'unidentified',
           livenessScore: passiveScore,
           matchScore: verify.matchScore,
+          location,
         });
         refreshCounts();
         setVerdict({
@@ -582,18 +673,38 @@ export default function CameraScreen(): React.JSX.Element {
         });
         return;
       }
+      // Presence gate — independent of identity. Only blocks when enforcement is
+      // on (GEOFENCE.enforce) and the fix is off-site, mocked, or too coarse.
+      if (GEOFENCE.enforce && !geo.passed) {
+        store.queueAttendance({
+          userId: verify.userId,
+          livenessScore: Math.max(passiveScore, THRESHOLDS.livenessPassive),
+          matchScore: verify.matchScore,
+          location,
+        });
+        refreshCounts();
+        setVerdict({
+          ok: false,
+          title: 'Off-site or spoofed GPS',
+          detail: `${verify.userId} · ${geofenceReasonText(geo)}`,
+          score: composite.overall,
+          latencyMs,
+        });
+        return;
+      }
       store.queueAttendance({
         userId: verify.userId,
-        livenessScore: live.passed
-          ? Math.max(passiveScore, THRESHOLDS.livenessPassive)
-          : passiveScore,
+        livenessScore: Math.max(passiveScore, THRESHOLDS.livenessPassive),
         matchScore: verify.matchScore,
+        location,
       });
       refreshCounts();
       setVerdict({
         ok: true,
         title: composite.lowTrust ? 'Matched · review' : 'Matched offline',
-        detail: `${verify.userId} · score ${composite.overall}/100`,
+        detail: `${verify.userId} · score ${composite.overall}/100${
+          location ? ` · ${geofenceReasonText(geo)}` : ''
+        }`,
         score: composite.overall,
         latencyMs,
       });

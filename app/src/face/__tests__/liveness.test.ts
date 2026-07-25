@@ -18,8 +18,19 @@ const open = face({leftEyeOpenProbability: 1, rightEyeOpenProbability: 1});
 const closed = face({leftEyeOpenProbability: 0, rightEyeOpenProbability: 0});
 
 describe('active liveness (3-layer randomized)', () => {
-  it('demands blink, smile and head-turn in a random order', () => {
-    const c = new ActiveLivenessChallenge();
+  it('defaults to a single motion action (blink or turn) that defeats a photo', () => {
+    const c = new ActiveLivenessChallenge(); // count defaults to livenessActionCount (1)
+    const snap = c.start(0);
+    expect(snap.challenges).toHaveLength(THRESHOLDS.livenessActionCount);
+    // a single action is always motion-based — never 'smile', which a static
+    // smiling photo could satisfy.
+    for (const step of snap.challenges) {
+      expect(['blink', 'turn']).toContain(step);
+    }
+  });
+
+  it('supports the full randomized 3-action showcase when asked', () => {
+    const c = new ActiveLivenessChallenge(Math.random, undefined, 3);
     const snap = c.start(0);
     expect([...snap.challenges].sort()).toEqual(['blink', 'smile', 'turn']);
   });

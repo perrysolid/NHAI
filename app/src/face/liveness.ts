@@ -53,14 +53,18 @@ export class ActiveLivenessChallenge {
   constructor(
     rng: () => number = Math.random,
     fixedSteps?: ActiveChallengeKind[],
+    count: number = THRESHOLDS.livenessActionCount,
   ) {
     if (fixedSteps && fixedSteps.length) {
       this.challenges = fixedSteps;
     } else {
-      this.challenges = shuffle<ActiveChallengeKind>(
-        ['blink', 'smile', 'turn'],
-        rng,
-      );
+      // A single action must be motion-based (blink/turn) so a static photo
+      // can't satisfy it — a photo of a smiling face would pass 'smile' alone.
+      // The full 3-action showcase adds 'smile' for variety.
+      const n = Math.max(1, count);
+      const pool: ActiveChallengeKind[] =
+        n <= 1 ? ['blink', 'turn'] : ['blink', 'smile', 'turn'];
+      this.challenges = shuffle<ActiveChallengeKind>(pool, rng).slice(0, n);
     }
   }
 

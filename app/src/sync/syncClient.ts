@@ -15,16 +15,26 @@ export interface SyncOutcome {
   error?: string;
 }
 
+export interface SyncRecord {
+  userId: string;
+  timestamp: number;
+  livenessPassed: boolean;
+  livenessScore: number;
+  matchScore: number;
+  matchDistance: number;
+  deviceId: string;
+  /** On-device geofence summary — omitted when no GPS fix was available. */
+  lat?: number;
+  lon?: number;
+  accuracyM?: number;
+  mocked?: boolean;
+  geofencePassed?: boolean;
+  siteId?: string;
+  distanceM?: number;
+}
+
 export function toSyncPayload(records: AttendanceRecord[]): {
-  records: Array<{
-    userId: string;
-    timestamp: number;
-    livenessPassed: boolean;
-    livenessScore: number;
-    matchScore: number;
-    matchDistance: number;
-    deviceId: string;
-  }>;
+  records: SyncRecord[];
 } {
   return {
     records: records.map(r => ({
@@ -35,6 +45,17 @@ export function toSyncPayload(records: AttendanceRecord[]): {
       matchScore: r.matchScore,
       matchDistance: 1 - r.matchScore,
       deviceId: r.deviceId,
+      ...(r.location
+        ? {
+            lat: r.location.lat,
+            lon: r.location.lon,
+            accuracyM: r.location.accuracyM,
+            mocked: r.location.mocked,
+            geofencePassed: r.location.geofencePassed,
+            siteId: r.location.siteId,
+            distanceM: r.location.distanceM,
+          }
+        : {}),
     })),
   };
 }

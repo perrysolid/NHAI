@@ -1,6 +1,12 @@
 import {autoFireReady} from '../autoCapture';
 
-const base = {now: 10_000, lastAt: 0, cooldownMs: 700, blocked: false, gateReady: true};
+const base = {
+  now: 10_000,
+  lastAt: 0,
+  cooldownMs: 700,
+  blocked: false,
+  gateReady: true,
+};
 
 describe('autoFireReady (hands-free trigger)', () => {
   it('fires when the face is centered, idle, and the cooldown has elapsed', () => {
@@ -17,13 +23,9 @@ describe('autoFireReady (hands-free trigger)', () => {
 
   it('respects the cooldown window', () => {
     // 699ms since last trigger < 700ms cooldown.
-    expect(
-      autoFireReady({...base, now: 1_699, lastAt: 1_000}),
-    ).toBe(false);
+    expect(autoFireReady({...base, now: 1_699, lastAt: 1_000})).toBe(false);
     // exactly at the cooldown boundary fires.
-    expect(
-      autoFireReady({...base, now: 1_700, lastAt: 1_000}),
-    ).toBe(true);
+    expect(autoFireReady({...base, now: 1_700, lastAt: 1_000})).toBe(true);
   });
 
   it('uses the verify cooldown (3000ms) the same way', () => {

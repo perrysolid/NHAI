@@ -58,7 +58,11 @@ describe('syncClient', () => {
           json: async () => ({
             accepted: 1,
             acceptedRecords: [
-              {userId: first.userId, timestamp: first.timestamp, deviceId: first.deviceId},
+              {
+                userId: first.userId,
+                timestamp: first.timestamp,
+                deviceId: first.deviceId,
+              },
             ],
           }),
         } as any),
