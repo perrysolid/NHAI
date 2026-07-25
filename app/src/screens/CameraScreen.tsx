@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Image,
   Linking,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -46,7 +47,6 @@ import {createLocationProvider} from '../location/locationProvider';
 import type {GeofenceResult, LocationFix} from '../location/types';
 import type {RecordLocation} from '../auth/offlineStore';
 import {evaluateFace} from '../camera/qualityGates';
-import {autoFireReady} from '../camera/autoCapture';
 import {meanLuma} from '../camera/frameUtils';
 import {cropFace, scaleBox} from '../camera/faceCrop';
 import type {Face, FaceBounds, GateResult} from '../camera/types';
@@ -56,6 +56,7 @@ import {
   pick,
   GATE_TEXT,
   LIVENESS_TEXT,
+  ENROLL_STEP_TEXT,
   getLang,
   setLang,
   type Lang,
@@ -75,6 +76,96 @@ import GuidanceOverlay from './GuidanceOverlay';
 type Page = 'home' | 'enroll_id' | 'camera';
 type Mode = 'enroll' | 'verify';
 type EngineState = 'loading' | 'ready' | 'error';
+
+/**
+ * Guided, FIXED-order enrollment: neutral, smile, blink, turn. One embedding
+ * sample is captured per pose once its gesture is confirmed, so the stored
+ * template covers a spread of expressions/angles instead of three
+ * near-identical frames of the same neutral pose grabbed in quick succession.
+ * Fixed order (unlike the verify challenge, which randomizes) because this is
+ * teaching the system what the person looks like, not testing for liveness
+ * under adversarial conditions.
+ */
+type EnrollStepKind = 'neutral' | 'smile' | 'blink' | 'turn';
+const ENROLL_STEPS: EnrollStepKind[] = ['neutral', 'smile', 'blink', 'turn'];
+
+interface EnrollGestureState {
+  blinkPhase: 'await_open' | 'await_close' | 'await_reopen';
+  baselineYaw: number | null;
+  minEye: number;
+  maxEye: number;
+}
+
+function freshEnrollGestureState(): EnrollGestureState {
+  return {blinkPhase: 'await_open', baselineYaw: null, minEye: 1, maxEye: 0};
+}
+
+/**
+ * True the instant the given step's pose is confirmed on this frame. Mutates
+ * `state` to track blink/turn progress across calls for the SAME step — the
+ * caller must reset `state` (freshEnrollGestureState()) whenever it advances
+ * to a new step, otherwise leftover baseline/phase from the previous step
+ * would corrupt detection of the next one.
+ */
+function isEnrollStepReady(
+  step: EnrollStepKind,
+  face: Face | null,
+  gateReady: boolean,
+  state: EnrollGestureState,
+): boolean {
+  switch (step) {
+    case 'neutral':
+      return gateReady;
+    case 'smile':
+      return !!face && (face.smilingProbability ?? 0) >= THRESHOLDS.smileProb;
+    case 'blink': {
+      if (!face) {
+        return false;
+      }
+      const eye = Math.min(
+        face.leftEyeOpenProbability ?? 1,
+        face.rightEyeOpenProbability ?? 1,
+      );
+      state.minEye = Math.min(state.minEye, eye);
+      state.maxEye = Math.max(state.maxEye, eye);
+      const open = eye >= THRESHOLDS.blinkOpenProb;
+      const closed = eye <= THRESHOLDS.blinkClosedProb;
+      if (state.blinkPhase === 'await_open' && open) {
+        state.blinkPhase = 'await_close';
+      } else if (state.blinkPhase === 'await_close' && closed) {
+        state.blinkPhase = 'await_reopen';
+      } else if (state.blinkPhase === 'await_reopen' && open) {
+        // Guard against a flat/near-static reading sneaking through the
+        // open/closed cutoffs without a real swing.
+        return state.maxEye - state.minEye >= THRESHOLDS.livenessMotionRange;
+      }
+      return false;
+    }
+    case 'turn': {
+      if (!face) {
+        return false;
+      }
+      if (state.baselineYaw === null) {
+        state.baselineYaw = face.yawAngle;
+      }
+      return (
+        Math.abs(face.yawAngle - state.baselineYaw) >=
+        THRESHOLDS.headTurnDeltaDeg
+      );
+    }
+  }
+}
+
+function enrollStepGuidance(step: EnrollStepKind | 'done'): string {
+  return pick(ENROLL_STEP_TEXT[step]);
+}
+
+const ENROLL_STEP_LABEL: Record<EnrollStepKind, string> = {
+  neutral: 'Neutral face',
+  smile: 'Smile',
+  blink: 'Blink',
+  turn: 'Turn head',
+};
 
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
@@ -142,13 +233,26 @@ export default function CameraScreen(): React.JSX.Element {
   const [userId, setUserId] = useState('');
   const [engineState, setEngineState] = useState<EngineState>('loading');
   const [engineError, setEngineError] = useState('');
-  const [samples, setSamples] = useState(0);
+  // Which guided step (ENROLL_STEPS index) enrollment is currently on/has
+  // reached — drives both the capture decision and the progress UI.
+  const [enrollStepIndex, setEnrollStepIndex] = useState(0);
   const [enrolled, setEnrolled] = useState(0);
   const [pending, setPending] = useState(0);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   const [liveness, setLiveness] = useState<LivenessSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  // True for the brief confirmation window between the final step saving and
+  // returning Home — without it, all 4 poses can complete in a few seconds
+  // and the screen would flash and vanish with no visible "saved" moment.
+  const [enrollComplete, setEnrollComplete] = useState(false);
+  // Big check/cross shown over the camera the instant a verify attempt
+  // resolves (matched, no match, liveness failed, off-site) — held for
+  // CAMERA.verifyResultHoldMs so the outcome is impossible to miss without
+  // needing to scroll down to the verdict card below the camera.
+  const [verifyResultTone, setVerifyResultTone] = useState<
+    'success' | 'failure' | null
+  >(null);
 
   const store = useMemo<OfflineAuthStore>(() => createEncryptedAuthStore(), []);
   const locationProvider = useMemo(() => createLocationProvider(), []);
@@ -159,14 +263,36 @@ export default function CameraScreen(): React.JSX.Element {
   const latestMediumRef = useRef<MediumFrame | null>(null);
   const latestRgbLenRef = useRef(0);
   const enrollSamplesRef = useRef<Float32Array[]>([]);
+  // Blink-phase / turn-baseline tracking for whichever enroll step is active;
+  // reset (freshEnrollGestureState()) every time enrollStepIndex advances.
+  const enrollGestureRef = useRef<EnrollGestureState>(freshEnrollGestureState());
+  // Always holds the latest onCaptureEnrollStep closure so onSignals (a
+  // stable, empty-deps callback) can invoke the current version without being
+  // recreated itself — same mirroring pattern as the other *Ref values below.
+  const onCaptureEnrollStepRef = useRef<() => Promise<void>>(async () => {});
   const challengeRef = useRef<ActiveLivenessChallenge | null>(null);
   // Mirrors for stable closures used by the autonomous capture loop.
   const busyRef = useRef(false);
   const gateReadyRef = useRef(false);
-  const lastAutoRef = useRef(0);
+  const modeRef = useRef<Mode>('enroll');
+  const enrollStepIndexRef = useRef(0);
+  const engineStateRef = useRef<EngineState>('loading');
   // Re-armed only after the face leaves the ring, so auto-verify fires once per
   // presentation instead of looping.
   const verifyArmedRef = useRef(true);
+  // True while the big check/cross result is on screen. Blocks the
+  // auto-trigger below from starting a NEW attempt during that window — the
+  // last challenge action is often 'turn', so the face can drift off-center
+  // and re-center again within a second or two after a result appears, which
+  // would otherwise re-arm and immediately fire a fresh verify, wiping the
+  // result out before it could be read.
+  const verifyResultActiveRef = useRef(false);
+  const enrollCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const verifyResultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   useEffect(() => {
     busyRef.current = busy;
@@ -174,6 +300,18 @@ export default function CameraScreen(): React.JSX.Element {
   useEffect(() => {
     gateReadyRef.current = gate.ready;
   }, [gate.ready]);
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+  useEffect(() => {
+    enrollStepIndexRef.current = enrollStepIndex;
+  }, [enrollStepIndex]);
+  useEffect(() => {
+    engineStateRef.current = engineState;
+  }, [engineState]);
+  useEffect(() => {
+    verifyResultActiveRef.current = verifyResultTone !== null;
+  }, [verifyResultTone]);
 
   const refreshCounts = useCallback(() => {
     setEnrolled(store.listEnrollments().length);
@@ -287,10 +425,42 @@ export default function CameraScreen(): React.JSX.Element {
           mediumHeight?: number,
         ) => {
           const gateResult = evaluateFace({faces, frameWidth, brightness});
-          setGate(gateResult);
+          setGate(prev =>
+            prev.status === gateResult.status && prev.ready === gateResult.ready
+              ? prev
+              : gateResult,
+          );
           latestFaceRef.current = faces.length === 1 ? faces[0] : null;
           latestBrightnessRef.current = brightness;
           latestRgbLenRef.current = rgbLen;
+          // Trigger enroll capture HERE, the instant a step's pose is
+          // confirmed, instead of polling a flag from a separate interval.
+          // isEnrollStepReady's blink/turn checks are transient — they can
+          // read true on one frame and false on the next as the tracked value
+          // oscillates around the threshold — so a slower poll can easily
+          // always sample the false frames and never the true one. Reacting
+          // immediately here (same cadence as every other per-frame signal)
+          // never misses the moment.
+          if (
+            modeRef.current === 'enroll' &&
+            engineStateRef.current === 'ready' &&
+            !busyRef.current &&
+            enrollStepIndexRef.current < ENROLL_STEPS.length
+          ) {
+            const step = ENROLL_STEPS[enrollStepIndexRef.current];
+            const ready = isEnrollStepReady(
+              step,
+              latestFaceRef.current,
+              gateResult.ready,
+              enrollGestureRef.current,
+            );
+            if (ready) {
+              // Claim synchronously so the next onSignals call (which can
+              // arrive before React processes setBusy(true)) can't re-fire.
+              busyRef.current = true;
+              onCaptureEnrollStepRef.current().catch(() => undefined);
+            }
+          }
           if (
             mediumRgb &&
             mediumWidth &&
@@ -416,8 +586,10 @@ export default function CameraScreen(): React.JSX.Element {
     setMode('enroll');
     setPage('enroll_id');
     setVerdict(null);
-    setSamples(0);
+    setEnrollStepIndex(0);
+    setEnrollComplete(false);
     enrollSamplesRef.current = [];
+    enrollGestureRef.current = freshEnrollGestureState();
   }, []);
 
   const openEnrollCamera = useCallback(() => {
@@ -450,13 +622,54 @@ export default function CameraScreen(): React.JSX.Element {
     setPage('camera');
     setLiveness(null);
     setVerdict(null);
+    setVerifyResultTone(null);
   }, [store]);
 
+  // Shows the big check/cross over the camera. A failure auto-clears after
+  // CAMERA.verifyResultHoldMs so scanning can resume; a match PINS instead —
+  // it must not silently restart the hands-free loop on its own. The operator
+  // explicitly chooses "Return home" or "Begin new verification" (rendered
+  // below) to move on.
+  const showVerifyResult = useCallback((tone: 'success' | 'failure') => {
+    if (verifyResultTimerRef.current) {
+      clearTimeout(verifyResultTimerRef.current);
+      verifyResultTimerRef.current = null;
+    }
+    setVerifyResultTone(tone);
+    if (tone === 'failure') {
+      verifyResultTimerRef.current = setTimeout(() => {
+        verifyResultTimerRef.current = null;
+        setVerifyResultTone(null);
+      }, CAMERA.verifyResultHoldMs);
+    }
+  }, []);
+
   const goHome = useCallback(() => {
+    if (enrollCompleteTimerRef.current) {
+      clearTimeout(enrollCompleteTimerRef.current);
+      enrollCompleteTimerRef.current = null;
+    }
+    if (verifyResultTimerRef.current) {
+      clearTimeout(verifyResultTimerRef.current);
+      verifyResultTimerRef.current = null;
+    }
+    setVerifyResultTone(null);
     challengeRef.current = null;
     setLiveness(null);
     setPage('home');
   }, []);
+
+  useEffect(
+    () => () => {
+      if (enrollCompleteTimerRef.current) {
+        clearTimeout(enrollCompleteTimerRef.current);
+      }
+      if (verifyResultTimerRef.current) {
+        clearTimeout(verifyResultTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const captureEmbedding = useCallback(async (): Promise<Float32Array> => {
     const engine = engineRef.current;
@@ -488,73 +701,69 @@ export default function CameraScreen(): React.JSX.Element {
     return engine.embedFace(preprocessRgb(crop, spec));
   }, [engineState]);
 
-  const onCaptureEnroll = useCallback(async () => {
+  // Captures the CURRENT enroll step's sample, then advances to the next pose
+  // (or finishes enrollment on the last one). Called only once the step's
+  // gesture has actually been confirmed by isEnrollStepReady — see the
+  // autonomous-capture effect below.
+  const onCaptureEnrollStep = useCallback(async () => {
     const id = userId.trim();
     if (!id) {
       setVerdict({ok: false, title: 'Enter inspector ID', detail: 'Required'});
       return;
     }
+    const step = ENROLL_STEPS[enrollStepIndex];
     setBusy(true);
     try {
       const embedding = await captureEmbedding();
       enrollSamplesRef.current.push(embedding);
-      const count = enrollSamplesRef.current.length;
-      setSamples(count);
-      if (count >= THRESHOLDS.enrollSamples) {
+      const nextIndex = enrollStepIndex + 1;
+      enrollGestureRef.current = freshEnrollGestureState();
+      if (nextIndex >= ENROLL_STEPS.length) {
         store.saveEnrollment(id, enrollSamplesRef.current);
         enrollSamplesRef.current = [];
-        setSamples(0);
+        setEnrollStepIndex(nextIndex);
         refreshCounts();
-        setMode('verify');
-        setLiveness(null);
         setVerdict({
           ok: true,
           title: 'Enrollment saved offline',
           detail: `${id} is ready for verification`,
         });
+        // Enrollment's only job is to capture and save — it must not silently
+        // hand off into verification on the same screen. Hold here with a
+        // visible "saved" confirmation before returning Home instead of
+        // navigating away instantly (which read as the screen "flashing and
+        // closing").
+        setEnrollComplete(true);
+        enrollCompleteTimerRef.current = setTimeout(() => {
+          enrollCompleteTimerRef.current = null;
+          goHome();
+        }, CAMERA.enrollCompleteDelayMs);
       } else {
+        setEnrollStepIndex(nextIndex);
         setVerdict({
           ok: true,
-          title: `Sample ${count}/${THRESHOLDS.enrollSamples}`,
-          detail: 'Hold steady and capture the next sample',
+          title: `Step ${nextIndex}/${ENROLL_STEPS.length} captured`,
+          detail: `Next: ${enrollStepGuidance(ENROLL_STEPS[nextIndex])}`,
         });
       }
     } catch (e) {
       setVerdict({
         ok: false,
-        title: 'Capture blocked',
+        title: `Capture blocked (${step})`,
         detail: e instanceof Error ? e.message : 'Try again',
       });
     } finally {
       setBusy(false);
     }
-  }, [captureEmbedding, refreshCounts, store, userId]);
+  }, [captureEmbedding, enrollStepIndex, goHome, refreshCounts, store, userId]);
 
-  // Autonomous enrollment: while on the enroll camera, capture steady samples
-  // automatically as soon as the face is centered in the ring — no tapping. The
-  // quality gate (gateReadyRef) is the "face in the center" trigger.
+  // Autonomous enrollment capture is triggered directly from onSignals (every
+  // processed frame) the instant a step's pose is confirmed — see the
+  // isEnrollStepReady call there. This just keeps the ref onSignals calls
+  // pointing at the current closure.
   useEffect(() => {
-    if (page !== 'camera' || mode !== 'enroll' || engineState !== 'ready') {
-      return;
-    }
-    const id = setInterval(() => {
-      const now = Date.now();
-      if (
-        !autoFireReady({
-          now,
-          lastAt: lastAutoRef.current,
-          cooldownMs: CAMERA.autoCaptureCooldownMs,
-          blocked: busyRef.current,
-          gateReady: gateReadyRef.current,
-        })
-      ) {
-        return;
-      }
-      lastAutoRef.current = now;
-      onCaptureEnroll().catch(() => undefined);
-    }, CAMERA.autoLoopIntervalMs);
-    return () => clearInterval(id);
-  }, [page, mode, engineState, onCaptureEnroll]);
+    onCaptureEnrollStepRef.current = onCaptureEnrollStep;
+  }, [onCaptureEnrollStep]);
 
   const startVerify = useCallback(() => {
     if (store.listEnrollments().length === 0) {
@@ -565,6 +774,11 @@ export default function CameraScreen(): React.JSX.Element {
       });
       return;
     }
+    if (verifyResultTimerRef.current) {
+      clearTimeout(verifyResultTimerRef.current);
+      verifyResultTimerRef.current = null;
+    }
+    setVerifyResultTone(null);
     const challenge = new ActiveLivenessChallenge();
     challengeRef.current = challenge;
     setLiveness(challenge.start(Date.now()));
@@ -652,6 +866,7 @@ export default function CameraScreen(): React.JSX.Element {
           location,
         });
         refreshCounts();
+        showVerifyResult('failure');
         setVerdict({
           ok: false,
           title: 'Liveness blocked',
@@ -662,6 +877,7 @@ export default function CameraScreen(): React.JSX.Element {
         return;
       }
       if (!verify.ok || !verify.userId) {
+        showVerifyResult('failure');
         setVerdict({
           ok: false,
           title: 'No match',
@@ -683,6 +899,7 @@ export default function CameraScreen(): React.JSX.Element {
           location,
         });
         refreshCounts();
+        showVerifyResult('failure');
         setVerdict({
           ok: false,
           title: 'Off-site or spoofed GPS',
@@ -699,6 +916,7 @@ export default function CameraScreen(): React.JSX.Element {
         location,
       });
       refreshCounts();
+      showVerifyResult('success');
       setVerdict({
         ok: true,
         title: composite.lowTrust ? 'Matched · review' : 'Matched offline',
@@ -709,7 +927,7 @@ export default function CameraScreen(): React.JSX.Element {
         latencyMs,
       });
     },
-    [refreshCounts, store, userId],
+    [refreshCounts, showVerifyResult, store, userId],
   );
 
   // Autonomous verification — hands-free to START, but liveness is mandatory.
@@ -730,6 +948,7 @@ export default function CameraScreen(): React.JSX.Element {
       if (
         busyRef.current ||
         challengeRef.current !== null ||
+        verifyResultActiveRef.current ||
         !verifyArmedRef.current
       ) {
         return;
@@ -740,8 +959,19 @@ export default function CameraScreen(): React.JSX.Element {
     return () => clearInterval(id);
   }, [page, mode, engineState, startVerify]);
 
+  const livenessStatus = liveness?.status;
+
+  // Runs the active-liveness challenge tick loop. Deliberately keyed off the
+  // STATUS string, not the `liveness` snapshot object itself: every tick below
+  // calls setLiveness(snap) with a brand-new object, so depending on the whole
+  // object here would tear down and recreate this interval on every single
+  // tick (~every 160ms) for the whole challenge duration — needless churn, and
+  // under fake timers in tests it could alias with the mocked camera's own
+  // interval and starve the challenge of ever seeing a state change. Keying off
+  // `status` means the interval is set up once when the challenge starts and
+  // torn down once when it ends.
   useEffect(() => {
-    if (mode !== 'verify' || !liveness || liveness.status !== 'running') {
+    if (mode !== 'verify' || livenessStatus !== 'running') {
       return;
     }
     const id = setInterval(() => {
@@ -762,6 +992,7 @@ export default function CameraScreen(): React.JSX.Element {
         setBusy(true);
         runVerify('passed')
           .catch((e: unknown) => {
+            showVerifyResult('failure');
             setVerdict({
               ok: false,
               title: 'Verify failed',
@@ -780,6 +1011,7 @@ export default function CameraScreen(): React.JSX.Element {
           matchScore: 0,
         });
         refreshCounts();
+        showVerifyResult('failure');
         setVerdict({
           ok: false,
           title: 'Liveness failed',
@@ -789,7 +1021,16 @@ export default function CameraScreen(): React.JSX.Element {
       }
     }, CAMERA.challengeTickMs);
     return () => clearInterval(id);
-  }, [liveness, mode, refreshCounts, runVerify, store, userId, voice]);
+  }, [
+    livenessStatus,
+    mode,
+    refreshCounts,
+    runVerify,
+    showVerifyResult,
+    store,
+    userId,
+    voice,
+  ]);
 
   // Offline → online sync. Pushes the local queue to the AWS/Render backend and
   // purges only the records the server acknowledges. In MOCK_MODE it simulates a
@@ -828,7 +1069,7 @@ export default function CameraScreen(): React.JSX.Element {
   const onClearLocal = useCallback(() => {
     store.clearAll();
     enrollSamplesRef.current = [];
-    setSamples(0);
+    setEnrollStepIndex(0);
     refreshCounts();
     setVerdict({
       ok: true,
@@ -895,183 +1136,248 @@ export default function CameraScreen(): React.JSX.Element {
     );
   }
 
-  const actionDisabled = busy || engineState !== 'ready';
-  const actionLabel =
-    mode === 'enroll'
-      ? `Capture sample ${samples + 1}/${THRESHOLDS.enrollSamples}`
-      : busy
-      ? 'Verifying...'
-      : liveness?.status === 'running'
-      ? liveness.guidance
-      : 'Start liveness + verify';
+  const cameraTop = (
+    <View style={styles.cameraTop}>
+      <TouchableOpacity style={styles.backPill} onPress={goHome}>
+        <Text style={styles.backPillText}>BACK</Text>
+      </TouchableOpacity>
+      <StatusPill
+        label={
+          engineState === 'ready'
+            ? 'MODELS READY'
+            : engineState === 'loading'
+            ? 'LOADING MODELS'
+            : 'MODEL ERROR'
+        }
+        tone={engineState === 'ready' ? 'good' : 'warn'}
+      />
+    </View>
+  );
+  const cameraFeed = (
+    <Camera
+      style={StyleSheet.absoluteFill}
+      device={device}
+      isActive={true}
+      // Force a CPU-readable frame format. Without this, some devices hand
+      // the resize plugin a private/native GPU buffer it can't read, so it
+      // returns an empty buffer -> "Expected 37632 RGB bytes, got 0".
+      pixelFormat="yuv"
+      frameProcessor={frameProcessor}
+    />
+  );
+  const langVoiceToggles = (
+    <View style={styles.toggleRow}>
+      <TouchableOpacity style={styles.smallToggle} onPress={toggleLang}>
+        <Text style={styles.smallToggleText}>
+          {lang === 'hi' ? 'हिन्दी' : 'ENG'}
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.smallToggle, voice && styles.toggleOn]}
+        onPress={() => setVoice(v => !v)}>
+        <Text style={styles.smallToggleText}>{voice ? 'Voice' : 'Mute'}</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
+  // Enroll and verify are two dedicated screens sharing only the pieces above.
+  // Previously they were one screen gated by `mode`, and completing
+  // enrollment silently swapped its content into the verify UI — this is the
+  // "chaotic" jump the enroll flow must not do anymore.
+  if (mode === 'enroll') {
+    const enrollBusy = busy || engineState !== 'ready' || enrollComplete;
+    const currentStep = enrollComplete ? null : ENROLL_STEPS[enrollStepIndex];
+    const stepPrompt = enrollStepGuidance(currentStep ?? 'done');
+    const overlayText = enrollComplete
+      ? stepPrompt
+      : gate.ready
+      ? stepPrompt
+      : gate.guidance;
+    return (
+      <View style={styles.container}>
+        <View style={styles.cameraPane}>
+          {cameraFeed}
+          <GuidanceOverlay
+            ready={gate.ready}
+            text={overlayText}
+            resultTone={enrollComplete ? 'success' : undefined}
+          />
+          {cameraTop}
+          <View style={styles.cameraActionBar}>
+            <TouchableOpacity
+              disabled={enrollBusy}
+              style={[
+                styles.cameraActionButton,
+                enrollBusy && styles.disabledButton,
+              ]}
+              onPress={onCaptureEnrollStep}>
+              <Text style={styles.cameraActionText}>
+                {enrollComplete
+                  ? 'Saved — returning home...'
+                  : `Capture: ${ENROLL_STEP_LABEL[currentStep!]}`}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <ScrollView
+          style={styles.panel}
+          contentContainerStyle={styles.panelContent}>
+          <View style={styles.headerRow}>
+            <View>
+              <Text style={styles.kicker}>DATALAKE 3.0 FIELD AUTH</Text>
+              <Text style={styles.panelTitle}>Enroll Face</Text>
+            </View>
+            {langVoiceToggles}
+          </View>
+
+          {engineState === 'error' && (
+            <Text style={styles.errorText}>{engineError}</Text>
+          )}
+
+          <View style={styles.card}>
+            <Text style={styles.idLine}>{userId.trim()}</Text>
+            <Text style={styles.progressText}>
+              {enrollComplete
+                ? `All ${ENROLL_STEPS.length} poses captured — saved`
+                : `Step ${enrollStepIndex + 1}/${ENROLL_STEPS.length} — follow each prompt, captures automatically`}
+            </Text>
+            <View style={styles.stepList}>
+              {ENROLL_STEPS.map((step, i) => {
+                const isDone = enrollComplete || i < enrollStepIndex;
+                const isCurrent = !enrollComplete && i === enrollStepIndex;
+                return (
+                  <View key={step} style={styles.stepRow}>
+                    <View
+                      style={[
+                        styles.stepMarker,
+                        isDone && styles.stepMarkerDone,
+                        isCurrent && styles.stepMarkerCurrent,
+                      ]}>
+                      <Text
+                        style={[
+                          styles.stepMarkerText,
+                          isDone && styles.stepMarkerTextDone,
+                        ]}>
+                        {isDone ? '✓' : i + 1}
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.stepLabel,
+                        isCurrent && styles.stepLabelCurrent,
+                      ]}>
+                      {ENROLL_STEP_LABEL[step]}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+
+          {verdict && (
+            <View style={[styles.verdict, verdict.ok && styles.verdictOk]}>
+              <Text style={styles.verdictTitle}>{verdict.title}</Text>
+              <Text style={styles.verdictDetail}>{verdict.detail}</Text>
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // mode === 'verify'
+  const verifyBusy = busy || engineState !== 'ready';
+  const verifyRunning = liveness?.status === 'running';
+  const showingResult = verifyResultTone !== null;
+  const overlayText = showingResult
+    ? verdict?.title ?? (verifyResultTone === 'success' ? 'Matched' : 'Not verified')
+    : liveness?.guidance || gate.guidance;
+  const verifyLabel = showingResult
+    ? verifyResultTone === 'success'
+      ? 'Matched'
+      : 'Not verified'
+    : busy
+    ? 'Verifying...'
+    : verifyRunning
+    ? liveness!.guidance
+    : 'Start liveness + verify';
   return (
     <View style={styles.container}>
       <View style={styles.cameraPane}>
-        <Camera
-          style={StyleSheet.absoluteFill}
-          device={device}
-          isActive={true}
-          // Force a CPU-readable frame format. Without this, some devices hand
-          // the resize plugin a private/native GPU buffer it can't read, so it
-          // returns an empty buffer -> "Expected 37632 RGB bytes, got 0".
-          pixelFormat="yuv"
-          frameProcessor={frameProcessor}
+        {cameraFeed}
+        <GuidanceOverlay
+          ready={gate.ready}
+          text={overlayText}
+          subtitle={
+            verifyRunning ? `${Math.ceil(liveness!.msLeft / 1000)}s` : undefined
+          }
+          resultTone={verifyResultTone ?? undefined}
         />
-        <GuidanceOverlay gate={gate} />
-        <View style={styles.cameraTop}>
-          <TouchableOpacity style={styles.backPill} onPress={goHome}>
-            <Text style={styles.backPillText}>BACK</Text>
-          </TouchableOpacity>
-          <StatusPill
-            label={
-              engineState === 'ready'
-                ? 'MODELS READY'
-                : engineState === 'loading'
-                ? 'LOADING MODELS'
-                : 'MODEL ERROR'
-            }
-            tone={engineState === 'ready' ? 'good' : 'warn'}
-          />
-        </View>
-        <View style={styles.cameraBottom}>
-          <Text style={styles.guidanceText}>
-            {liveness?.guidance || gate.guidance}
-          </Text>
-          {liveness?.status === 'running' && (
-            <Text style={styles.timerText}>
-              {Math.ceil(liveness.msLeft / 1000)}s
-            </Text>
-          )}
-        </View>
+        {cameraTop}
         <View style={styles.cameraActionBar}>
-          <TouchableOpacity
-            disabled={actionDisabled || liveness?.status === 'running'}
-            style={[
-              styles.cameraActionButton,
-              (actionDisabled || liveness?.status === 'running') &&
-                styles.disabledButton,
-            ]}
-            onPress={mode === 'enroll' ? onCaptureEnroll : startVerify}>
-            <Text style={styles.cameraActionText}>{actionLabel}</Text>
-          </TouchableOpacity>
-          <Text style={styles.cameraActionHint}>
-            {engineState === 'ready'
-              ? gate.ready
-                ? mode === 'enroll'
-                  ? 'Face detected — capturing automatically. Hold steady.'
-                  : 'Face detected — follow the liveness prompts.'
-                : gate.guidance
-              : engineState === 'loading'
-              ? 'Loading offline models...'
-              : engineError}
-          </Text>
+          {verifyResultTone === 'success' ? (
+            <View style={styles.resultActionsRow}>
+              <TouchableOpacity
+                style={[styles.resultActionButton, styles.resultActionSecondary]}
+                onPress={goHome}>
+                <Text style={styles.resultActionSecondaryText}>
+                  Return to Home
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.resultActionButton, styles.resultActionPrimary]}
+                onPress={startVerify}>
+                <Text style={styles.resultActionPrimaryText}>
+                  Begin new verification
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              disabled={verifyBusy || verifyRunning || showingResult}
+              style={[
+                styles.cameraActionButton,
+                (verifyBusy || verifyRunning || showingResult) &&
+                  styles.disabledButton,
+              ]}
+              onPress={startVerify}>
+              <Text style={styles.cameraActionText}>{verifyLabel}</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
-      <View style={styles.panel}>
+      <ScrollView
+        style={styles.panel}
+        contentContainerStyle={styles.panelContent}>
         <View style={styles.headerRow}>
           <View>
             <Text style={styles.kicker}>DATALAKE 3.0 FIELD AUTH</Text>
-            <Text style={styles.panelTitle}>
-              {mode === 'enroll' ? 'Enroll Face' : 'Verify Face'}
-            </Text>
+            <Text style={styles.panelTitle}>Verify Face</Text>
           </View>
-          <View style={styles.toggleRow}>
-            <TouchableOpacity style={styles.smallToggle} onPress={toggleLang}>
-              <Text style={styles.smallToggleText}>
-                {lang === 'hi' ? 'हिन्दी' : 'ENG'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.smallToggle, voice && styles.toggleOn]}
-              onPress={() => setVoice(v => !v)}>
-              <Text style={styles.smallToggleText}>
-                {voice ? 'Voice' : 'Mute'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.statsRow}>
-          <Metric label="Templates" value={String(enrolled)} />
-          <Metric label="Local records" value={String(pending)} />
-          <Metric
-            label="Model"
-            value={
-              engineState === 'ready'
-                ? `${ACTIVE_RECOGNITION}`
-                : engineState === 'loading'
-                ? 'loading'
-                : 'error'
-            }
-          />
+          {langVoiceToggles}
         </View>
 
         {engineState === 'error' && (
           <Text style={styles.errorText}>{engineError}</Text>
         )}
 
-        {mode === 'enroll' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Capture local face template</Text>
-            <Text style={styles.idLine}>{userId.trim()}</Text>
-            <Text style={styles.helperText}>
-              Center your face in the ring — it turns green and all{' '}
-              {THRESHOLDS.enrollSamples} samples are captured automatically and
-              stored on this phone. No tapping needed (manual button below is a
-              fallback).
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Run local verification</Text>
+          <Text style={styles.helperText}>
+            Center your face in the ring — you'll be asked to blink, smile and
+            turn your head, in a random order, then matching runs against the
+            templates saved on this phone.
+          </Text>
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={openEnrollSetup}>
+            <Text style={styles.secondaryButtonText}>
+              Enroll another inspector
             </Text>
-            <TouchableOpacity
-              disabled={busy || engineState !== 'ready'}
-              style={[
-                styles.primaryButton,
-                (busy || engineState !== 'ready') && styles.disabledButton,
-              ]}
-              onPress={onCaptureEnroll}>
-              <Text style={styles.primaryButtonText}>
-                Capture sample {samples + 1}/{THRESHOLDS.enrollSamples}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={openEnrollSetup}>
-              <Text style={styles.secondaryButtonText}>
-                Change inspector ID
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {mode === 'verify' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Run local verification</Text>
-            <Text style={styles.helperText}>
-              Center your face in the ring — the randomized blink / smile /
-              head-turn liveness challenge starts automatically, then MiniFASNet
-              passive anti-spoof + MobileFaceNet matching run on-device.
-              Liveness is always required, so a photo or replay can't pass.
-            </Text>
-            <TouchableOpacity
-              disabled={busy || engineState !== 'ready'}
-              style={[
-                styles.primaryButton,
-                (busy || engineState !== 'ready') && styles.disabledButton,
-              ]}
-              onPress={startVerify}>
-              <Text style={styles.primaryButtonText}>
-                {busy ? 'Verifying...' : 'Start liveness + verify'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={openEnrollSetup}>
-              <Text style={styles.secondaryButtonText}>
-                Enroll another inspector
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
+          </TouchableOpacity>
+        </View>
 
         {verdict && (
           <View style={[styles.verdict, verdict.ok && styles.verdictOk]}>
@@ -1084,7 +1390,7 @@ export default function CameraScreen(): React.JSX.Element {
             </Text>
           </View>
         )}
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -1109,7 +1415,7 @@ function HomePage({
   onReset: () => void;
 }): React.JSX.Element {
   return (
-    <View style={[styles.container, styles.home]}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.home}>
       <Image source={LOGO} style={styles.homeLogo} />
       <Text style={styles.kicker}>DATALAKE 3.0 FIELD AUTH</Text>
       <Text style={styles.homeTitle}>Face Auth</Text>
@@ -1159,7 +1465,7 @@ function HomePage({
       )}
 
       <Text style={styles.versionTag}>{APP_VERSION}</Text>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -1179,7 +1485,7 @@ function EnrollIdPage({
   onBack: () => void;
 }): React.JSX.Element {
   return (
-    <View style={[styles.container, styles.setupPage]}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.setupPage}>
       <TouchableOpacity style={styles.backPill} onPress={onBack}>
         <Text style={styles.backPillText}>BACK</Text>
       </TouchableOpacity>
@@ -1217,7 +1523,7 @@ function EnrollIdPage({
           <Text style={styles.verdictDetail}>{verdict.detail}</Text>
         </View>
       )}
-    </View>
+    </ScrollView>
   );
 }
 
@@ -1307,9 +1613,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#0d1216',
     borderTopColor: '#25323b',
     borderTopWidth: 1,
+  },
+  panelContent: {
     paddingHorizontal: 16,
     paddingTop: 14,
-    paddingBottom: 10,
+    paddingBottom: 24,
   },
   title: {color: '#dbe4e8', fontSize: 22, fontWeight: '800', marginBottom: 8},
   subtitle: {
@@ -1328,23 +1636,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
-  cameraBottom: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 112,
-    minHeight: 46,
-    backgroundColor: 'rgba(7,9,11,0.74)',
-    borderColor: '#25323b',
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  guidanceText: {color: '#dbe4e8', fontSize: 15, fontWeight: '700', flex: 1},
-  timerText: {color: '#38e0a5', fontSize: 16, fontWeight: '900'},
   cameraActionBar: {
     position: 'absolute',
     left: 16,
@@ -1369,11 +1660,30 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     textAlign: 'center',
   },
-  cameraActionHint: {
-    color: '#8b97a5',
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 8,
+  resultActionsRow: {flexDirection: 'row', gap: 8},
+  resultActionButton: {
+    flex: 1,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+  },
+  resultActionPrimary: {backgroundColor: '#38e0a5'},
+  resultActionSecondary: {
+    borderColor: '#38e0a5',
+    borderWidth: 1,
+  },
+  resultActionPrimaryText: {
+    color: '#07100d',
+    fontSize: 13,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  resultActionSecondaryText: {
+    color: '#38e0a5',
+    fontSize: 13,
+    fontWeight: '900',
     textAlign: 'center',
   },
   statusPill: {
@@ -1419,7 +1729,6 @@ const styles = StyleSheet.create({
   },
   toggleOn: {borderColor: '#38e0a5'},
   smallToggleText: {color: '#dbe4e8', fontSize: 12, fontWeight: '700'},
-  statsRow: {flexDirection: 'row', gap: 8, marginTop: 12},
   metric: {
     flex: 1,
     backgroundColor: '#111a21',
@@ -1449,6 +1758,29 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     marginTop: 8,
   },
+  progressText: {
+    color: '#8b97a5',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  stepList: {marginTop: 14, gap: 10},
+  stepRow: {flexDirection: 'row', alignItems: 'center', gap: 10},
+  stepMarker: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderColor: '#25323b',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepMarkerDone: {backgroundColor: '#38e0a5', borderColor: '#38e0a5'},
+  stepMarkerCurrent: {borderColor: '#38e0a5', borderWidth: 2},
+  stepMarkerText: {color: '#dbe4e8', fontSize: 12, fontWeight: '900'},
+  stepMarkerTextDone: {color: '#07100d'},
+  stepLabel: {color: '#8b97a5', fontSize: 14, fontWeight: '600'},
+  stepLabelCurrent: {color: '#dbe4e8', fontWeight: '900'},
   input: {
     marginTop: 12,
     borderColor: '#25323b',
