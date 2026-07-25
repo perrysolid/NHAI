@@ -1,9 +1,11 @@
 import {THRESHOLDS} from '../config';
 import {averageEmbeddings, matchEmbedding, type Embedding} from '../face/math';
+import type {Site} from '../location/types';
 
 const ENROLLMENTS_KEY = 'dfa.enrollments.v1';
 const QUEUE_KEY = 'dfa.queue.v1';
 const DEVICE_KEY = 'dfa.deviceId.v1';
+const SITES_KEY = 'dfa.sites.v1';
 
 export interface KeyValueStorage {
   getString(key: string): string | undefined;
@@ -147,9 +149,19 @@ export class OfflineAuthStore {
     );
   }
 
+  /** Cache the geofence sites provisioned from the admin dashboard (offline use). */
+  saveSites(sites: Site[]): void {
+    writeJson(this.storage, SITES_KEY, sites);
+  }
+
+  getSites(): Site[] {
+    return readJson<Site[]>(this.storage, SITES_KEY, []);
+  }
+
   clearAll(): void {
     this.storage.delete(ENROLLMENTS_KEY);
     this.storage.delete(QUEUE_KEY);
+    this.storage.delete(SITES_KEY);
   }
 }
 

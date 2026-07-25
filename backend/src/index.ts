@@ -13,10 +13,12 @@ import express from 'express';
 import cors from 'cors';
 import {apiKeyGuard} from './auth.js';
 import {createStore, sanitizeMany} from './store.js';
+import {createSitesStore, sanitizeSite, ROLES} from './sites.js';
 import {renderDashboard} from './dashboard.js';
 
 const app = express();
 const store = createStore();
+const sitesStore = createSitesStore();
 
 app.use(
   cors({origin: process.env.CORS_ORIGIN ?? '*', methods: ['GET', 'POST']}),
@@ -102,6 +104,79 @@ app.get('/api/records', apiKeyGuard, async (req, res) => {
   }
 });
 
+// ── Admin login ──
+// Simple username/password check against env, returning the API key the
+// dashboard then sends as x-api-key on admin calls. (Supabase-backed admin
+// accounts can replace this later without changing the client contract.)
+app.post('/api/admin/login', (req, res) => {
+  const username = String(req.body?.username ?? '');
+  const password = String(req.body?.password ?? '');
+  const U = process.env.ADMIN_USER;
+  const P = process.env.ADMIN_PASSWORD;
+  if (!U || !P) {
+    res.status(500).json({
+      ok: false,
+      error: 'admin login not configured — set ADMIN_USER and ADMIN_PASSWORD',
+    });
+    return;
+  }
+  if (username === U && password === P) {
+    res.json({ok: true, token: process.env.API_KEY ?? ''});
+  } else {
+    res.status(401).json({ok: false, error: 'invalid username or password'});
+  }
+});
+
+// ── Geofence sites (admin provisioning + device pull) ──
+// The role list feeds the admin form's dropdown.
+app.get('/api/roles', (_req, res) => {
+  res.json({ok: true, roles: ROLES});
+});
+
+// Admin: list every provisioned site.
+app.get('/api/sites', apiKeyGuard, async (_req, res) => {
+  try {
+    res.json({ok: true, sites: await sitesStore.list()});
+  } catch (e) {
+    res.status(500).json({ok: false, error: e instanceof Error ? e.message : 'db error'});
+  }
+});
+
+// Admin: create or update a site (assign a circular zone to an inspector).
+app.post('/api/sites', apiKeyGuard, async (req, res) => {
+  const site = sanitizeSite(req.body);
+  if (!site) {
+    res.status(400).json({
+      ok: false,
+      error: 'invalid site: need name, assignedUserId and a circle shape {center:{lat,lon}, radiusM>0}',
+    });
+    return;
+  }
+  try {
+    res.json({ok: true, site: await sitesStore.upsert(site)});
+  } catch (e) {
+    res.status(500).json({ok: false, error: e instanceof Error ? e.message : 'db error'});
+  }
+});
+
+// Admin: delete a site.
+app.delete('/api/sites/:id', apiKeyGuard, async (req, res) => {
+  try {
+    res.json({ok: true, deleted: await sitesStore.remove(req.params.id)});
+  } catch (e) {
+    res.status(500).json({ok: false, error: e instanceof Error ? e.message : 'db error'});
+  }
+});
+
+// Device: pull the site(s) assigned to this inspector, to cache offline.
+app.get('/api/sites/for/:userId', apiKeyGuard, async (req, res) => {
+  try {
+    res.json({ok: true, sites: await sitesStore.forUser(req.params.userId)});
+  } catch (e) {
+    res.status(500).json({ok: false, error: e instanceof Error ? e.message : 'db error'});
+  }
+});
+
 app.get('/admin', async (req, res) => {
   const passcode = process.env.ADMIN_PASSCODE;
   if (passcode && req.query.key !== passcode) {
@@ -121,8 +196,7 @@ app.get('/admin', async (req, res) => {
 });
 
 const port = Number(process.env.PORT) || 4000;
-store
-  .init()
+Promise.all([store.init(), sitesStore.init()])
   .then(() => {
     app.listen(port, () => {
       // eslint-disable-next-line no-console

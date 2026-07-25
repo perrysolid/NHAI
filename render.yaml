@@ -16,9 +16,19 @@ services:
       - key: API_KEY
         generateValue: true # shared secret; mirror into the frontend's VITE_SYNC_KEY
       - key: ADMIN_PASSCODE
-        generateValue: true # /admin?key=...
+        generateValue: true # /admin?key=... (server-rendered ops console)
+      - key: ADMIN_USER
+        sync: false # admin dashboard login username
+      - key: ADMIN_PASSWORD
+        sync: false # admin dashboard login password
       - key: CORS_ORIGIN
         sync: false # set to https://<your-vercel-app>.vercel.app
+      # Supabase as the durable store (service_role key — server-side only).
+      # When both are set, sites (+ future enrolment) persist to Supabase.
+      - key: SUPABASE_URL
+        sync: false # https://<project>.supabase.co
+      - key: SUPABASE_SERVICE_KEY
+        sync: false # sb_secret_... (NEVER expose client-side)
       # For durable storage, create a Render Postgres and wire it here:
       # - key: DATABASE_URL
       #   fromDatabase:

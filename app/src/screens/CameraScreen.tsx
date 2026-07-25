@@ -43,6 +43,10 @@ import {
   THRESHOLDS,
 } from '../config';
 import {evaluateGeofence} from '../location/geofence';
+import {
+  fetchAssignedSites,
+  baseUrlFromSyncUrl,
+} from '../location/provisioning';
 import {createLocationProvider} from '../location/locationProvider';
 import type {GeofenceResult, LocationFix} from '../location/types';
 import type {RecordLocation} from '../auth/offlineStore';
@@ -842,7 +846,11 @@ export default function CameraScreen(): React.JSX.Element {
       // reads the cached GPS fix (no wait) and never touches the identity
       // decision — it's an independent presence signal on the record.
       const fix = latestFixRef.current;
-      const geo = evaluateGeofence(fix, SITES, {
+      // Prefer admin-provisioned sites cached on the device; fall back to the
+      // static config.SITES only when nothing has been provisioned yet.
+      const cachedSites = store.getSites();
+      const activeSites = cachedSites.length > 0 ? cachedSites : SITES;
+      const geo = evaluateGeofence(fix, activeSites, {
         maxAccuracyM: GEOFENCE.maxAccuracyM,
         rejectMocked: GEOFENCE.rejectMocked,
       });
@@ -1044,6 +1052,28 @@ export default function CameraScreen(): React.JSX.Element {
         apiKey: SYNC.apiKey,
       });
       refreshCounts();
+      // Best-effort: pull this inspector's admin-assigned geofence zone(s) and
+      // cache them locally for offline use. Independent of the (maybe mocked)
+      // sync above; if the backend is unreachable we keep any cached sites.
+      let sitesNote = '';
+      const inspectorId = userId.trim();
+      if (inspectorId) {
+        try {
+          const sites = await fetchAssignedSites({
+            baseUrl: baseUrlFromSyncUrl(SYNC.url),
+            apiKey: SYNC.apiKey,
+            userId: inspectorId,
+          });
+          store.saveSites(sites);
+          sitesNote = sites.length
+            ? ` · ${sites.length} geofence zone${
+                sites.length === 1 ? '' : 's'
+              } provisioned`
+            : '';
+        } catch {
+          /* offline / backend down — retain previously cached sites */
+        }
+      }
       if (outcome.ok) {
         setVerdict({
           ok: true,
@@ -1052,7 +1082,9 @@ export default function CameraScreen(): React.JSX.Element {
             : 'Synced to server · queue purged',
           detail: `${outcome.purged} record${
             outcome.purged === 1 ? '' : 's'
-          } uploaded${outcome.mocked ? ' — MOCK_MODE, no network' : ''}`,
+          } uploaded${
+            outcome.mocked ? ' — MOCK_MODE, no network' : ''
+          }${sitesNote}`,
         });
       } else {
         setVerdict({
@@ -1064,7 +1096,7 @@ export default function CameraScreen(): React.JSX.Element {
     } finally {
       setSyncing(false);
     }
-  }, [refreshCounts, store]);
+  }, [refreshCounts, store, userId]);
 
   const onClearLocal = useCallback(() => {
     store.clearAll();

@@ -9,6 +9,7 @@
  * lighting) captured on-device at verification time.
  */
 import {Pool} from 'pg';
+import {getSupabase, isSupabaseConfigured} from './supabase.js';
 
 export interface InspectionMetrics {
   ear: number;
@@ -268,7 +269,86 @@ class PostgresStore implements Store {
   }
 }
 
+// ── Supabase (service_role via supabase-js) ──
+// Table `attendance` (see docs/SUPABASE.md). Dedupes on (user_id, ts, device_id).
+class SupabaseStore implements Store {
+  kind = 'postgres' as const;
+  private get db() {
+    const c = getSupabase();
+    if (!c) {
+      throw new Error('Supabase not configured');
+    }
+    return c;
+  }
+  async init(): Promise<void> {
+    const {error} = await this.db.from('attendance').select('user_id').limit(1);
+    if (error && !/permission|row-level/i.test(error.message)) {
+      // eslint-disable-next-line no-console
+      console.warn(`[store] Supabase probe: ${error.message} — run docs/SUPABASE.md schema.`);
+    }
+  }
+  private toRow(r: AttendanceRecord) {
+    return {
+      user_id: r.userId,
+      ts: r.timestamp,
+      device_id: r.deviceId,
+      liveness_passed: r.livenessPassed,
+      match_distance: r.matchDistance,
+      confidence: r.confidence ?? null,
+      score: r.score ?? null,
+      latency_ms: r.latencyMs ?? null,
+      metrics: r.inspection ?? null,
+      location: r.location ?? null,
+    };
+  }
+  private fromRow(row: Record<string, unknown>): AttendanceRecord {
+    return {
+      userId: String(row.user_id),
+      timestamp: Number(row.ts),
+      deviceId: String(row.device_id),
+      livenessPassed: Boolean(row.liveness_passed),
+      matchDistance: num(row.match_distance),
+      confidence: optNum(row.confidence),
+      score: optNum(row.score),
+      latencyMs: optNum(row.latency_ms),
+      inspection: sanitizeInspection(row.metrics),
+      location:
+        row.location != null
+          ? sanitizeLocation(row.location as Record<string, unknown>)
+          : undefined,
+    };
+  }
+  async add(records: AttendanceRecord[]): Promise<AttendanceRecord[]> {
+    const {data, error} = await this.db
+      .from('attendance')
+      .upsert(records.map(r => this.toRow(r)), {
+        onConflict: 'user_id,ts,device_id',
+        ignoreDuplicates: true,
+      })
+      .select();
+    if (error) {
+      throw new Error(error.message);
+    }
+    return (data ?? []).map(r => this.fromRow(r));
+  }
+  async list(limit: number, since = 0): Promise<AttendanceRecord[]> {
+    const {data, error} = await this.db
+      .from('attendance')
+      .select('*')
+      .gte('ts', since)
+      .order('ts', {ascending: false})
+      .limit(limit);
+    if (error) {
+      throw new Error(error.message);
+    }
+    return (data ?? []).map(r => this.fromRow(r));
+  }
+}
+
 export function createStore(): Store {
+  if (isSupabaseConfigured()) {
+    return new SupabaseStore();
+  }
   const url = process.env.DATABASE_URL;
   return url ? new PostgresStore(url) : new MemoryStore();
 }

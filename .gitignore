@@ -52,3 +52,5 @@ docs/deck/qa-*.jpg
 # local submission package (large APK already lives in docs/deliverables)
 parth_submision/
 parth_submission/
+*.tsbuildinfo
+
