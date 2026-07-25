@@ -21,7 +21,11 @@ const store = createStore();
 const sitesStore = createSitesStore();
 
 app.use(
-  cors({origin: process.env.CORS_ORIGIN ?? '*', methods: ['GET', 'POST']}),
+  cors({
+    origin: process.env.CORS_ORIGIN ?? '*',
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'x-api-key'],
+  }),
 );
 app.use(express.json({limit: '1mb'}));
 
