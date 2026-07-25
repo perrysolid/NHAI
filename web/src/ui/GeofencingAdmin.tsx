@@ -118,6 +118,7 @@ export default function GeofencingAdmin(): React.JSX.Element {
         }
       })
       .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- state is set after async fetches, not synchronously
     loadSites();
   }, [loadSites]);
 
@@ -195,13 +196,18 @@ export default function GeofencingAdmin(): React.JSX.Element {
   }, []);
 
   return (
-    <div style={S.wrap}>
-      <div style={S.header}>
+    <div className="page">
+      <div className="page__head">
         <div>
-          <div style={S.kicker}>DATALAKE 3.0 · GEOFENCE PROVISIONING</div>
-          <h2 style={S.title}>Assign a work zone to an inspector</h2>
+          <div className="page__kicker">DATALAKE 3.0 · GEOFENCE PROVISIONING</div>
+          <h1 className="page__title">Assign a work zone to an inspector</h1>
+          <p className="page__sub">
+            Drop a circular zone on the satellite map and assign it to an
+            inspector. It provisions to their device on next sync and is then
+            enforced fully offline.
+          </p>
         </div>
-        <button style={S.ghostBtn} onClick={locateMe}>
+        <button className="btn btn--ghost" onClick={locateMe}>
           Use my location
         </button>
       </div>

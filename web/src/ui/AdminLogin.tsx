@@ -70,7 +70,11 @@ const S: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: '#07090b',
+    background: '#06080a',
+    backgroundImage:
+      'linear-gradient(rgba(90,120,140,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(90,120,140,0.04) 1px, transparent 1px)',
+    backgroundSize: '40px 40px',
+    fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
     padding: 24,
   },
   card: {
@@ -83,7 +87,13 @@ const S: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
   },
-  kicker: {color: '#38e0a5', fontSize: 10, fontWeight: 800, letterSpacing: 1.6},
+  kicker: {
+    color: '#38e0a5',
+    fontSize: 10,
+    fontWeight: 600,
+    letterSpacing: 2,
+    fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+  },
   title: {color: '#dbe4e8', fontSize: 22, fontWeight: 900, margin: '6px 0 2px'},
   sub: {color: '#8b97a5', fontSize: 13, margin: '0 0 8px', lineHeight: 1.5},
   label: {color: '#8b97a5', fontSize: 11, marginTop: 14, marginBottom: 5},

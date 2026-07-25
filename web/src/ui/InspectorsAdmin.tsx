@@ -31,11 +31,11 @@ export default function InspectorsAdmin(): React.JSX.Element {
   const [status, setStatus] = useState('Loading enrolled inspectors…');
   const [roleFilter, setRoleFilter] = useState('all');
 
-  const authHeaders = {'x-api-key': getToken() || SYNC.apiKey};
-
   const load = useCallback(async () => {
     try {
-      const r = await fetch(`${SYNC.url}/api/enrollments`, {headers: authHeaders});
+      const r = await fetch(`${SYNC.url}/api/enrollments`, {
+        headers: {'x-api-key': getToken() || SYNC.apiKey},
+      });
       const d = await r.json();
       if (d.ok) {
         setRows(d.enrollments);
@@ -46,10 +46,10 @@ export default function InspectorsAdmin(): React.JSX.Element {
     } catch {
       setStatus('Could not reach the backend.');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- state is set after the async fetch, not synchronously
     load();
   }, [load]);
 
@@ -61,13 +61,12 @@ export default function InspectorsAdmin(): React.JSX.Element {
       try {
         await fetch(`${SYNC.url}/api/enrollments/${encodeURIComponent(userId)}`, {
           method: 'DELETE',
-          headers: authHeaders,
+          headers: {'x-api-key': getToken() || SYNC.apiKey},
         });
         load();
       } catch {
         setStatus('Delete failed.');
       }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     },
     [load],
   );
@@ -83,29 +82,41 @@ export default function InspectorsAdmin(): React.JSX.Element {
   const filtered = roleFilter === 'all' ? rows : rows.filter(r => r.role === roleFilter);
 
   return (
-    <div style={S.wrap}>
-      <div style={S.header}>
+    <div className="page">
+      <div className="page__head">
         <div>
-          <div style={S.kicker}>DATALAKE 3.0 · INSPECTOR REGISTRY</div>
-          <h2 style={S.title}>Enrolled inspectors</h2>
+          <div className="page__kicker">DATALAKE 3.0 · INSPECTOR REGISTRY</div>
+          <h1 className="page__title">Enrolled inspectors</h1>
+          <p className="page__sub">
+            Every inspector enrolled from the field app. Templates are stored
+            centrally so any device can verify them offline; the vectors never
+            appear here — only their length.
+          </p>
         </div>
-        <button style={S.ghostBtn} onClick={load}>
+        <button className="btn btn--ghost" onClick={load}>
           Refresh
         </button>
       </div>
 
-      <div style={S.kpis}>
-        <Kpi label="Total enrolled" value={String(rows.length)} />
+      <div className="kpis">
+        <div className="kpi">
+          <div className="kpi__label">Total enrolled</div>
+          <div className="kpi__value kpi__value--signal">{rows.length}</div>
+        </div>
         {Object.keys(ROLE_LABELS).map(role => (
-          <Kpi key={role} label={ROLE_LABELS[role]} value={String(byRole[role] ?? 0)} />
+          <div className="kpi" key={role}>
+            <div className="kpi__label">{ROLE_LABELS[role]}</div>
+            <div className="kpi__value">{byRole[role] ?? 0}</div>
+          </div>
         ))}
       </div>
 
-      <div style={S.card}>
-        <div style={S.cardHead}>
-          <span style={S.kicker}>ROSTER ({filtered.length})</span>
+      <div className="card">
+        <div className="card__head">
+          <span className="card__title">Roster ({filtered.length})</span>
           <select
-            style={S.select}
+            className="select"
+            style={{width: 'auto'}}
             value={roleFilter}
             onChange={e => setRoleFilter(e.target.value)}>
             <option value="all">All roles</option>
@@ -117,103 +128,44 @@ export default function InspectorsAdmin(): React.JSX.Element {
           </select>
         </div>
         {filtered.length === 0 ? (
-          <div style={S.empty}>{status || 'No inspectors for this filter.'}</div>
+          <div className="empty">{status || 'No inspectors for this filter.'}</div>
         ) : (
-          <table style={S.table}>
-            <thead>
-              <tr>
-                <th style={S.th}>Name</th>
-                <th style={S.th}>Inspector ID</th>
-                <th style={S.th}>Role</th>
-                <th style={S.th}>Samples</th>
-                <th style={S.th}>Template</th>
-                <th style={S.th}>Enrolled</th>
-                <th style={S.th}>Device</th>
-                <th style={S.th}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(e => (
-                <tr key={e.userId}>
-                  <td style={S.td}>{e.name}</td>
-                  <td style={S.tdMono}>{e.userId}</td>
-                  <td style={S.td}>{ROLE_LABELS[e.role] ?? e.role}</td>
-                  <td style={S.tdMono}>{e.samples}</td>
-                  <td style={S.tdMono}>{e.embeddingLength}-d</td>
-                  <td style={S.tdMono}>{new Date(e.enrolledAt).toLocaleString()}</td>
-                  <td style={S.tdMono}>{e.deviceId}</td>
-                  <td style={S.td}>
-                    <button style={S.delBtn} onClick={() => remove(e.userId)}>
-                      Revoke
-                    </button>
-                  </td>
+          <div style={{overflowX: 'auto'}}>
+            <table className="atable">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Inspector ID</th>
+                  <th>Role</th>
+                  <th>Samples</th>
+                  <th>Template</th>
+                  <th>Enrolled</th>
+                  <th>Device</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filtered.map(e => (
+                  <tr key={e.userId}>
+                    <td>{e.name}</td>
+                    <td className="mono">{e.userId}</td>
+                    <td>{ROLE_LABELS[e.role] ?? e.role}</td>
+                    <td className="mono dim">{e.samples}</td>
+                    <td className="mono dim">{e.embeddingLength}-d</td>
+                    <td className="mono dim">{new Date(e.enrolledAt).toLocaleString()}</td>
+                    <td className="mono dim">{e.deviceId}</td>
+                    <td>
+                      <button className="btn btn--danger" onClick={() => remove(e.userId)}>
+                        Revoke
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
   );
 }
-
-function Kpi({label, value}: {label: string; value: string}): React.JSX.Element {
-  return (
-    <div style={S.kpi}>
-      <div style={S.kpiValue}>{value}</div>
-      <div style={S.kpiLabel}>{label}</div>
-    </div>
-  );
-}
-
-const S: Record<string, React.CSSProperties> = {
-  wrap: {padding: '20px 22px', color: '#dbe4e8'},
-  header: {display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 16},
-  kicker: {color: '#38e0a5', fontSize: 10, fontWeight: 800, letterSpacing: 1.6},
-  title: {margin: '4px 0 0', fontSize: 22, fontWeight: 900},
-  kpis: {display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10, marginBottom: 16},
-  kpi: {background: '#0d1216', border: '1px solid #25323b', borderRadius: 8, padding: '12px 14px'},
-  kpiValue: {color: '#38e0a5', fontSize: 22, fontWeight: 900, fontFamily: 'ui-monospace, monospace'},
-  kpiLabel: {color: '#8b97a5', fontSize: 10, marginTop: 4},
-  card: {background: '#0d1216', border: '1px solid #25323b', borderRadius: 10, padding: 14},
-  cardHead: {display: 'flex', justifyContent: 'space-between', alignItems: 'center'},
-  select: {
-    background: '#111a21',
-    border: '1px solid #25323b',
-    color: '#dbe4e8',
-    padding: '6px 10px',
-    borderRadius: 6,
-    fontSize: 13,
-  },
-  empty: {color: '#46535b', fontFamily: 'ui-monospace, monospace', padding: '20px 0'},
-  table: {width: '100%', borderCollapse: 'collapse', marginTop: 12, fontSize: 13},
-  th: {
-    textAlign: 'left',
-    color: '#46535b',
-    fontSize: 10,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    padding: '8px 10px',
-    borderBottom: '1px solid #1a242c',
-  },
-  td: {padding: '10px', borderBottom: '1px solid #1a242c'},
-  tdMono: {padding: '10px', borderBottom: '1px solid #1a242c', fontFamily: 'ui-monospace, monospace', color: '#8b97a5'},
-  delBtn: {
-    background: 'none',
-    border: '1px solid #ff6b6b',
-    color: '#ff6b6b',
-    borderRadius: 5,
-    padding: '4px 9px',
-    cursor: 'pointer',
-    fontSize: 12,
-  },
-  ghostBtn: {
-    background: 'transparent',
-    color: '#38e0a5',
-    border: '1px solid #38e0a5',
-    borderRadius: 6,
-    padding: '8px 12px',
-    cursor: 'pointer',
-    fontWeight: 700,
-  },
-};

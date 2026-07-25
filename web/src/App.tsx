@@ -47,6 +47,7 @@ import ScoreBreakdown from './ui/ScoreBreakdown';
 import GeofencingAdmin from './ui/GeofencingAdmin';
 import InspectorsAdmin from './ui/InspectorsAdmin';
 import AdminLogin from './ui/AdminLogin';
+import AdminShell from './ui/admin/AdminShell';
 import {isAuthed, logout} from './lib/adminAuth';
 
 type Mode = 'idle' | 'enrolling' | 'verifying';
@@ -99,7 +100,27 @@ function pageFromPath(pathname: string): Page {
 
 installNetMonitor();
 
-export default function App() {
+/**
+ * App — thin auth gate. The admin console (AdminShell) is the entire authed
+ * experience; the original hackathon demo below is retired but preserved as
+ * LegacyDemoConsole so its camera / face-api hooks never run in the admin.
+ */
+export default function App(): React.JSX.Element {
+  const [authed, setAuthed] = useState<boolean>(() => isAuthed());
+  if (!authed) {
+    return <AdminLogin onLogin={() => setAuthed(true)} />;
+  }
+  return (
+    <AdminShell
+      onSignOut={() => {
+        logout();
+        setAuthed(false);
+      }}
+    />
+  );
+}
+
+export function LegacyDemoConsole() {
   const [page, setPage] = useState<Page>(() => pageFromPath(window.location.pathname));
   const [authed, setAuthed] = useState<boolean>(() => isAuthed());
   const [modelState, setModelState] = useState<ModelState>('loading');
