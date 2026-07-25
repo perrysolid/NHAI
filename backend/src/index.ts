@@ -20,9 +20,26 @@ const app = express();
 const store = createStore();
 const sitesStore = createSitesStore();
 
+// Tolerate trailing slashes and a comma-separated list of allowed origins, so a
+// stray "https://app.vercel.app/" in CORS_ORIGIN doesn't silently block the SPA.
+const stripSlash = (s: string) => s.trim().replace(/\/+$/, '');
+const allowedOrigins = stripSlash(process.env.CORS_ORIGIN ?? '*')
+  .split(',')
+  .map(stripSlash)
+  .filter(Boolean);
+const corsOrigin =
+  allowedOrigins.includes('*') || allowedOrigins.length === 0
+    ? '*'
+    : (
+        origin: string | undefined,
+        cb: (err: Error | null, allow?: boolean) => void,
+      ) => {
+        // Non-browser callers (no Origin header) and matching origins are allowed.
+        cb(null, !origin || allowedOrigins.includes(stripSlash(origin)));
+      };
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN ?? '*',
+    origin: corsOrigin,
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'x-api-key'],
   }),
