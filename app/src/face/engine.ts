@@ -154,14 +154,27 @@ export function preprocessRgb(
     }
     src = packed;
   }
+  // Some models (MiniFASNet / Silent-Face, trained on OpenCV images) expect BGR.
+  const bgr = 'channelOrder' in spec && spec.channelOrder === 'bgr';
   if (spec.dtype === 'uint8') {
-    return src;
+    if (!bgr) {
+      return src;
+    }
+    const swapped = new Uint8Array(expected);
+    for (let i = 0; i < expected; i += 3) {
+      swapped[i] = src[i + 2];
+      swapped[i + 1] = src[i + 1];
+      swapped[i + 2] = src[i];
+    }
+    return swapped;
   }
   const out = new Float32Array(expected);
   for (let i = 0; i < expected; i += 3) {
-    out[i] = src[i] / 255 / spec.std[0] - spec.mean[0] / spec.std[0];
+    const c0 = bgr ? src[i + 2] : src[i];
+    const c2 = bgr ? src[i] : src[i + 2];
+    out[i] = c0 / 255 / spec.std[0] - spec.mean[0] / spec.std[0];
     out[i + 1] = src[i + 1] / 255 / spec.std[1] - spec.mean[1] / spec.std[1];
-    out[i + 2] = src[i + 2] / 255 / spec.std[2] - spec.mean[2] / spec.std[2];
+    out[i + 2] = c2 / 255 / spec.std[2] - spec.mean[2] / spec.std[2];
   }
   return out;
 }
