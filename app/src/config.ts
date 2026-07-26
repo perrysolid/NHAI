@@ -267,23 +267,14 @@ export const GEOFENCE = {
 } as const;
 
 /**
- * Provisioned work sites, stored ON-DEVICE (no network). Replace the demo entry
- * with the real assigned site(s). For a live demo, set `center` to your current
- * lat/lon (from Google Maps) and a radius that comfortably covers the room, then
- * flip GEOFENCE.enforce to true.
+ * Fallback sites when NOTHING has been provisioned to the device yet. Kept EMPTY
+ * on purpose: with no assigned zone we must not silently test against some
+ * hardcoded coordinate (e.g. a Delhi default), which would make every off-Delhi
+ * phone read "not in zone". Real sites arrive from the admin dashboard
+ * (GET /api/sites/for/:userId, cached in MMKV). With no site, the geofence
+ * reports `no_sites` — "No site configured" — and does not block or mislabel.
  */
-export const SITES: Site[] = [
-  {
-    id: 'demo-site',
-    name: 'Demo Site',
-    shape: {
-      kind: 'circle',
-      // TODO: set to the demo location's coordinates before enforcing.
-      center: {lat: 28.6139, lon: 77.209},
-      radiusM: 150,
-    },
-  },
-];
+export const SITES: Site[] = [];
 
 export const config = {
   FLAGS,
