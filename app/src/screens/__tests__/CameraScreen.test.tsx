@@ -6,17 +6,19 @@
  * good, centered face through the real frame -> quality-gate -> auto-capture
  * pipeline. No capture or verify button is ever tapped — only the two screen
  * transitions (Enroll -> camera, then Home -> Verify) are. We assert that:
- *   1. enrollment auto-captures all 4 guided poses (neutral, smile, blink,
- *      turn) and the screen returns Home (it must not silently swap into the
- *      verify UI), and
+ *   1. enrollment auto-captures all 4 guided actions (blink, smile, turnLeft,
+ *      turnRight) and the screen returns Home (it must not silently swap into
+ *      the verify UI), and
  *   2. once the operator explicitly opens Verify, the challenge auto-starts
- *      asking for all 3 actions (blink/smile/turn) in random order, the
- *      cycling face satisfies each one, and the result is a Match.
+ *      asking for 2 of those 4 actions in random order, the cycling face
+ *      satisfies each one, and the result is a Match.
  *
- * The mocked face cycles eye-open / yaw each frame so it satisfies blink and
- * turn (and holds a constant smiling probability so smile is always
- * satisfied), and the mocked TFLite model returns a fixed embedding so the
- * probe self-matches the enrollment.
+ * The mocked face cycles eye-openness every frame (satisfies blink) and yaw
+ * through a growing left/right swing (satisfies turnLeft and turnRight
+ * regardless of which frame each action's baseline happens to be captured
+ * on), and holds a constant smiling probability (satisfies smile). The mocked
+ * TFLite model returns a fixed embedding so the probe self-matches the
+ * enrollment.
  */
 import React from 'react';
 import TestRenderer, {act} from 'react-test-renderer';
@@ -54,10 +56,17 @@ jest.mock('react-native-vision-camera-face-detector', () => {
     useFaceDetector: () => ({
       detectFaces: () => {
         frame += 1;
-        // Cycle eye-openness and yaw every frame so the active-liveness
-        // challenge (blink + turn + smile, random order) is always satisfiable.
+        // Cycle eye-openness every frame so blink is always satisfiable.
         const eyeOpen = frame % 2 === 0 ? 0.92 : 0.12;
-        const yaw = frame % 2 === 0 ? 3 : 20; // both < maxYawDeg (45)
+        // Two incommensurate sine waves summed so yaw's LOCAL peak height
+        // keeps varying over time (never repeats the same extreme every
+        // period, unlike a single fixed-frequency wave) — whichever frame
+        // turnLeft/turnRight's baseline happens to be captured on, later
+        // frames reliably swing at least +-headTurnDeltaDeg past it in BOTH
+        // directions within a couple of seconds. Bounded well under
+        // maxYawDeg=45 throughout.
+        const yaw =
+          20 * Math.sin(frame * 0.31) + 15 * Math.sin(frame * 0.13);
         return [
           {
             bounds: {x: 144, y: 128, width: 192, height: 192}, // ratio 0.4
@@ -144,6 +153,10 @@ async function flush(): Promise<void> {
   }
 }
 
+// Explicit real-wall-clock timeouts below (Jest's 3rd test() arg): the loops
+// use a fake-timer budget (7s/11s), but Jest's default 5s REAL timeout can be
+// tight for this many act()/advanceTimersByTimeAsync round-trips under
+// full-suite parallel load, independent of the simulated budget.
 test('hands-free capture: centered face auto-enrolls and returns Home', async () => {
   let tree!: TestRenderer.ReactTestRenderer;
   await act(async () => {
@@ -189,7 +202,7 @@ test('hands-free capture: centered face auto-enrolls and returns Home', async ()
   expect(anyText(root, t => t.startsWith('Enrollment saved'))).toBe(true);
 
   act(() => tree.unmount());
-});
+}, 20000);
 
 test('hands-free verify: opening Verify auto-runs liveness + matching', async () => {
   let tree!: TestRenderer.ReactTestRenderer;
@@ -238,4 +251,4 @@ test('hands-free verify: opening Verify auto-runs liveness + matching', async ()
   expect(matched).toBe(true);
 
   act(() => tree.unmount());
-});
+}, 20000);
