@@ -44,7 +44,7 @@ import {
   SYNC,
   THRESHOLDS,
 } from '../config';
-import {evaluateGeofence, bearingDeg, compass8} from '../location/geofence';
+import {evaluateGeofence} from '../location/geofence';
 import {fetchAssignedSites, baseUrlFromSyncUrl} from '../location/provisioning';
 import {createLocationProvider} from '../location/locationProvider';
 import type {GeofenceResult, LocationFix} from '../location/types';
@@ -184,7 +184,7 @@ const ENROLL_ROLES: {id: string; label: string}[] = [
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
 // Bump alongside android versionName so a screenshot reveals the running build.
-const APP_VERSION = 'v2.1 · build 12';
+const APP_VERSION = 'v2.2 · build 13';
 
 /**
  * One downscaled full-frame RGB buffer plus the face box already scaled into its
@@ -220,9 +220,9 @@ function createInspectorId(): string {
 function geofenceReasonText(geo: GeofenceResult): string {
   switch (geo.reason) {
     case 'inside':
-      return `At ${geo.siteName ?? 'site'}`;
+      return `At ${geo.siteName ?? 'assigned site'}`;
     case 'outside':
-      return `${geo.distanceM} m outside ${geo.siteName ?? 'site'}`;
+      return 'Not in assigned zone';
     case 'poor_accuracy':
       return 'GPS accuracy too low';
     case 'mocked':
@@ -262,14 +262,16 @@ export default function CameraScreen(): React.JSX.Element {
   const [geoStatus, setGeoStatus] = useState<{
     reason: string;
     siteName?: string;
-    distanceM: number;
     inside: boolean;
-    compass?: string;
   } | null>(null);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   const [liveness, setLiveness] = useState<LivenessSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  // Prevent auto-sync on startup from firing more than once (e.g. if
+  // a re-render re-runs the mount effect). Stays false until the first
+  // successful or failed auto-sync attempt completes.
+  const autoSyncedRef = useRef(false);
   // True for the brief confirmation window between the final step saving and
   // returning Home — without it, all 4 poses can complete in a few seconds
   // and the screen would flash and vanish with no visible "saved" moment.
@@ -354,6 +356,31 @@ export default function CameraScreen(): React.JSX.Element {
     refreshCounts();
   }, [refreshCounts]);
 
+  // Auto-sync pending records leftover from a previous session (e.g.
+  // yesterday's attendance that the user verified offline). Fires once
+  // on mount when the queue is non-empty and the device has connectivity.
+  useEffect(() => {
+    if (autoSyncedRef.current) {
+      return;
+    }
+    const q = store.getPendingQueue();
+    if (q.length === 0) {
+      return;
+    }
+    // Check actual connectivity rather than the initial isOnline(true) default,
+    // which may not reflect the real state until NetInfo fires.
+    NetInfo.fetch().then(state => {
+      if (autoSyncedRef.current) {
+        return;
+      }
+      if (state.isConnected) {
+        autoSyncedRef.current = true;
+        onSync();
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Track connectivity so enrollment (an online-only action) can be gated
   // synchronously without awaiting a fetch in the button handler.
   useEffect(() => {
@@ -395,26 +422,17 @@ export default function CameraScreen(): React.JSX.Element {
             return;
           }
           if (!fix) {
-            setGeoStatus({reason: 'no_fix', distanceM: 0, inside: false});
+            setGeoStatus({reason: 'no_fix', inside: false});
             return;
           }
           const geo = evaluateGeofence(fix, provisioned, {
             maxAccuracyM: GEOFENCE.maxAccuracyM,
             rejectMocked: GEOFENCE.rejectMocked,
           });
-          let compass: string | undefined;
-          if (!geo.insideSite && geo.siteId) {
-            const site = provisioned.find(s => s.id === geo.siteId);
-            if (site && site.shape.kind === 'circle') {
-              compass = compass8(bearingDeg(fix, site.shape.center));
-            }
-          }
           setGeoStatus({
             reason: geo.reason,
             siteName: geo.siteName,
-            distanceM: geo.distanceM,
             inside: geo.insideSite,
-            compass,
           });
         })
         .catch(() => undefined);
@@ -1887,9 +1905,7 @@ function GeoBadge({
   status: {
     reason: string;
     siteName?: string;
-    distanceM: number;
     inside: boolean;
-    compass?: string;
   };
 }): React.JSX.Element {
   let color = '#8b97a5';
@@ -1897,13 +1913,11 @@ function GeoBadge({
   switch (status.reason) {
     case 'inside':
       color = '#38e0a5';
-      text = `At ${status.siteName ?? 'site'}`;
+      text = `At ${status.siteName ?? 'assigned site'}`;
       break;
     case 'outside':
       color = '#f2b347';
-      text = `${status.distanceM} m outside ${status.siteName ?? 'site'}${
-        status.compass ? ` · move ${status.compass}` : ''
-      }`;
+      text = 'Not in assigned zone';
       break;
     case 'mocked':
       color = '#ff6b6b';

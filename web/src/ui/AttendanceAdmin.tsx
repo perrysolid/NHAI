@@ -34,7 +34,7 @@ export default function AttendanceAdmin(): React.JSX.Element {
   const load = useCallback(async () => {
     try {
       const r = await fetch(`${SYNC.url}/api/records?limit=500`, {
-        headers: {'x-api-key': getToken() || SYNC.apiKey},
+        headers: {'x-api-key': getToken()},
       });
       const d = await r.json();
       if (d.ok) {

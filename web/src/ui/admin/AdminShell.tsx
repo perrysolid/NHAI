@@ -52,6 +52,9 @@ export default function AdminShell({
   onSignOut: () => void;
 }): React.JSX.Element {
   const [page, setPage] = useState<AdminPage>('inspectors');
+  const [prefill, setPrefill] = useState<{userId: string; role?: string} | null>(
+    null,
+  );
 
   return (
     <div className="admin">
@@ -95,8 +98,15 @@ export default function AdminShell({
       </aside>
 
       <main className="main">
-        {page === 'inspectors' && <InspectorsAdmin />}
-        {page === 'geofencing' && <GeofencingAdmin />}
+        {page === 'inspectors' && (
+          <InspectorsAdmin
+            onAssign={insp => {
+              setPrefill(insp);
+              setPage('geofencing');
+            }}
+          />
+        )}
+        {page === 'geofencing' && <GeofencingAdmin prefill={prefill} />}
         {page === 'attendance' && <AttendanceAdmin />}
       </main>
     </div>

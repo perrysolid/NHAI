@@ -35,7 +35,11 @@ const ESRI_IMAGERY =
 const ESRI_LABELS =
   'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}';
 
-export default function GeofencingAdmin(): React.JSX.Element {
+export default function GeofencingAdmin({
+  prefill,
+}: {
+  prefill?: {userId: string; role?: string} | null;
+}): React.JSX.Element {
   const mapDivRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const circleRef = useRef<L.Circle | null>(null);
@@ -47,11 +51,53 @@ export default function GeofencingAdmin(): React.JSX.Element {
   const [role, setRole] = useState('authority-engineer');
   const [roles, setRoles] = useState<string[]>(Object.keys(ROLE_LABELS));
   const [sites, setSites] = useState<Site[]>([]);
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
   const [status, setStatus] = useState('Click the map to place a work-zone centre.');
+
+  // Pre-fill the assignment form when an inspector is picked from the roster.
+  useEffect(() => {
+    if (prefill?.userId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing an incoming prop into local form state
+      setUserId(prefill.userId);
+      if (prefill.role) {
+        setRole(prefill.role);
+      }
+      setStatus(`Assigning a zone to ${prefill.userId} — click the map to place it.`);
+    }
+  }, [prefill]);
+
+  // Geocode a place name with OSM Nominatim and pan the map there.
+  const search = useCallback(async () => {
+    const q = query.trim();
+    if (!q) {
+      return;
+    }
+    setSearching(true);
+    try {
+      const r = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`,
+        {headers: {Accept: 'application/json'}},
+      );
+      const d = (await r.json()) as {lat: string; lon: string; display_name: string}[];
+      if (d.length) {
+        const lat = Number(d[0].lat);
+        const lon = Number(d[0].lon);
+        mapRef.current?.setView([lat, lon], 15);
+        setStatus(`Found: ${d[0].display_name}. Click the map to place the zone.`);
+      } else {
+        setStatus(`No place found for "${q}".`);
+      }
+    } catch {
+      setStatus('Place search failed (network).');
+    } finally {
+      setSearching(false);
+    }
+  }, [query]);
 
   const authHeaders = {
     'Content-Type': 'application/json',
-    'x-api-key': getToken() || SYNC.apiKey,
+    'x-api-key': getToken(),
   };
 
   // Init the Leaflet map once (satellite imagery + place labels).
@@ -212,6 +258,23 @@ export default function GeofencingAdmin(): React.JSX.Element {
         </button>
       </div>
 
+      <div style={S.searchRow}>
+        <input
+          style={S.searchInput}
+          value={query}
+          placeholder="Search a place — town, highway, chainage, landmark…"
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') {
+              search();
+            }
+          }}
+        />
+        <button className="btn btn--ghost" onClick={search} disabled={searching}>
+          {searching ? 'Searching…' : 'Search'}
+        </button>
+      </div>
+
       <div style={S.grid}>
         <div ref={mapDivRef} style={S.map} />
 
@@ -348,6 +411,16 @@ const S: Record<string, React.CSSProperties> = {
     color: '#dbe4e8',
     padding: '9px 10px',
     borderRadius: 6,
+    fontSize: 14,
+  },
+  searchRow: {display: 'flex', gap: 8, marginBottom: 12},
+  searchInput: {
+    flex: 1,
+    background: '#111a21',
+    border: '1px solid #25323b',
+    color: '#dbe4e8',
+    padding: '10px 12px',
+    borderRadius: 7,
     fontSize: 14,
   },
   coords: {

@@ -11,7 +11,7 @@
  */
 import express from 'express';
 import cors from 'cors';
-import {apiKeyGuard} from './auth.js';
+import {apiKeyGuard, adminGuard, generateAdminToken} from './auth.js';
 import {createStore, sanitizeMany} from './store.js';
 import {createSitesStore, sanitizeSite, ROLES} from './sites.js';
 import {createEnrollmentsStore, sanitizeEnrollment} from './enrollments.js';
@@ -115,7 +115,7 @@ app.post('/api/sync', apiKeyGuard, async (req, res) => {
   }
 });
 
-app.get('/api/records', apiKeyGuard, async (req, res) => {
+app.get('/api/records', adminGuard, async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 200, 1000);
   const since = Number(req.query.since) || 0;
   try {
@@ -128,9 +128,10 @@ app.get('/api/records', apiKeyGuard, async (req, res) => {
 });
 
 // ── Admin login ──
-// Simple username/password check against env, returning the API key the
-// dashboard then sends as x-api-key on admin calls. (Supabase-backed admin
-// accounts can replace this later without changing the client contract.)
+// Validates username/password against env and issues an ephemeral admin token
+// (a 64-char hex string). The web dashboard sends this as x-api-key on admin
+// calls. Independent of the device API_KEY — the key baked into the app binary
+// does not grant admin access. Tokens are in-memory: lost on server restart.
 app.post('/api/admin/login', (req, res) => {
   const username = String(req.body?.username ?? '');
   const password = String(req.body?.password ?? '');
@@ -144,7 +145,7 @@ app.post('/api/admin/login', (req, res) => {
     return;
   }
   if (username === U && password === P) {
-    res.json({ok: true, token: process.env.API_KEY ?? ''});
+    res.json({ok: true, token: generateAdminToken()});
   } else {
     res.status(401).json({ok: false, error: 'invalid username or password'});
   }
@@ -174,7 +175,7 @@ app.post('/api/enroll', apiKeyGuard, async (req, res) => {
   }
 });
 
-app.get('/api/enrollments', apiKeyGuard, async (_req, res) => {
+app.get('/api/enrollments', adminGuard, async (_req, res) => {
   try {
     res.json({ok: true, enrollments: await enrollmentsStore.list()});
   } catch (e) {
@@ -195,7 +196,7 @@ app.get('/api/enrollments/for/:userId', apiKeyGuard, async (req, res) => {
   }
 });
 
-app.delete('/api/enrollments/:userId', apiKeyGuard, async (req, res) => {
+app.delete('/api/enrollments/:userId', adminGuard, async (req, res) => {
   try {
     res.json({ok: true, deleted: await enrollmentsStore.remove(req.params.userId)});
   } catch (e) {
@@ -210,7 +211,7 @@ app.get('/api/roles', (_req, res) => {
 });
 
 // Admin: list every provisioned site.
-app.get('/api/sites', apiKeyGuard, async (_req, res) => {
+app.get('/api/sites', adminGuard, async (_req, res) => {
   try {
     res.json({ok: true, sites: await sitesStore.list()});
   } catch (e) {
@@ -219,7 +220,7 @@ app.get('/api/sites', apiKeyGuard, async (_req, res) => {
 });
 
 // Admin: create or update a site (assign a circular zone to an inspector).
-app.post('/api/sites', apiKeyGuard, async (req, res) => {
+app.post('/api/sites', adminGuard, async (req, res) => {
   const site = sanitizeSite(req.body);
   if (!site) {
     res.status(400).json({
@@ -236,7 +237,7 @@ app.post('/api/sites', apiKeyGuard, async (req, res) => {
 });
 
 // Admin: delete a site.
-app.delete('/api/sites/:id', apiKeyGuard, async (req, res) => {
+app.delete('/api/sites/:id', adminGuard, async (req, res) => {
   try {
     res.json({ok: true, deleted: await sitesStore.remove(req.params.id)});
   } catch (e) {

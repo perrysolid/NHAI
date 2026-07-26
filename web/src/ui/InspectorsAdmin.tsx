@@ -26,7 +26,11 @@ const ROLE_LABELS: Record<string, string> = {
   consultant: 'Consultant',
 };
 
-export default function InspectorsAdmin(): React.JSX.Element {
+export default function InspectorsAdmin({
+  onAssign,
+}: {
+  onAssign?: (inspector: {userId: string; role: string}) => void;
+}): React.JSX.Element {
   const [rows, setRows] = useState<Enrollment[]>([]);
   const [status, setStatus] = useState('Loading enrolled inspectors…');
   const [roleFilter, setRoleFilter] = useState('all');
@@ -34,7 +38,7 @@ export default function InspectorsAdmin(): React.JSX.Element {
   const load = useCallback(async () => {
     try {
       const r = await fetch(`${SYNC.url}/api/enrollments`, {
-        headers: {'x-api-key': getToken() || SYNC.apiKey},
+        headers: {'x-api-key': getToken()},
       });
       const d = await r.json();
       if (d.ok) {
@@ -61,7 +65,7 @@ export default function InspectorsAdmin(): React.JSX.Element {
       try {
         await fetch(`${SYNC.url}/api/enrollments/${encodeURIComponent(userId)}`, {
           method: 'DELETE',
-          headers: {'x-api-key': getToken() || SYNC.apiKey},
+          headers: {'x-api-key': getToken()},
         });
         load();
       } catch {
@@ -154,7 +158,15 @@ export default function InspectorsAdmin(): React.JSX.Element {
                     <td className="mono dim">{e.embeddingLength}-d</td>
                     <td className="mono dim">{new Date(e.enrolledAt).toLocaleString()}</td>
                     <td className="mono dim">{e.deviceId}</td>
-                    <td>
+                    <td style={{display: 'flex', gap: 8}}>
+                      {onAssign && (
+                        <button
+                          className="btn btn--ghost"
+                          style={{padding: '5px 11px', fontSize: 12}}
+                          onClick={() => onAssign({userId: e.userId, role: e.role})}>
+                          Assign zone
+                        </button>
+                      )}
                       <button className="btn btn--danger" onClick={() => remove(e.userId)}>
                         Revoke
                       </button>
