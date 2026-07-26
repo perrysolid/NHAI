@@ -1,9 +1,11 @@
 import {THRESHOLDS} from '../config';
 import {averageEmbeddings, matchEmbedding, type Embedding} from '../face/math';
+import type {Site} from '../location/types';
 
 const ENROLLMENTS_KEY = 'dfa.enrollments.v1';
 const QUEUE_KEY = 'dfa.queue.v1';
 const DEVICE_KEY = 'dfa.deviceId.v1';
+const SITES_KEY = 'dfa.sites.v1';
 
 export interface KeyValueStorage {
   getString(key: string): string | undefined;
@@ -16,6 +18,8 @@ export interface Enrollment {
   embedding: number[];
   createdAt: number;
   samples: number;
+  /** Datalake role chosen at enrollment (for the on-device welcome screen). */
+  role?: string;
 }
 
 export interface RecordLocation {
@@ -78,7 +82,12 @@ export class OfflineAuthStore {
     return readJson<Enrollment[]>(this.storage, ENROLLMENTS_KEY, []);
   }
 
-  saveEnrollment(userId: string, samples: Embedding[], now = Date.now()): void {
+  saveEnrollment(
+    userId: string,
+    samples: Embedding[],
+    now = Date.now(),
+    role?: string,
+  ): void {
     const embedding = averageEmbeddings(samples);
     const next = this.listEnrollments().filter(e => e.userId !== userId);
     next.push({
@@ -86,8 +95,17 @@ export class OfflineAuthStore {
       embedding: Array.from(embedding),
       createdAt: now,
       samples: samples.length,
+      ...(role ? {role} : {}),
     });
     writeJson(this.storage, ENROLLMENTS_KEY, next);
+  }
+
+  /** The most-recently enrolled identity on this device (for the welcome screen). */
+  latestEnrollment(): Enrollment | null {
+    const all = this.listEnrollments();
+    return all.length
+      ? all.reduce((a, b) => (b.createdAt > a.createdAt ? b : a))
+      : null;
   }
 
   verify(probe: Embedding): VerifyOutcome {
@@ -147,9 +165,19 @@ export class OfflineAuthStore {
     );
   }
 
+  /** Cache the geofence sites provisioned from the admin dashboard (offline use). */
+  saveSites(sites: Site[]): void {
+    writeJson(this.storage, SITES_KEY, sites);
+  }
+
+  getSites(): Site[] {
+    return readJson<Site[]>(this.storage, SITES_KEY, []);
+  }
+
   clearAll(): void {
     this.storage.delete(ENROLLMENTS_KEY);
     this.storage.delete(QUEUE_KEY);
+    this.storage.delete(SITES_KEY);
   }
 }
 

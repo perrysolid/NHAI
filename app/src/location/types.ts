@@ -36,6 +36,9 @@ export interface Site {
   id: string;
   name: string;
   shape: SiteShape;
+  /** Set when the site was provisioned from the admin dashboard. */
+  assignedUserId?: string;
+  role?: string;
 }
 
 export type GeofenceReason =

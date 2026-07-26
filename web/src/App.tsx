@@ -44,9 +44,14 @@ import CameraStage from './ui/CameraStage';
 import StatStrip from './ui/StatStrip';
 import InspectionPanel from './ui/InspectionPanel';
 import ScoreBreakdown from './ui/ScoreBreakdown';
+import GeofencingAdmin from './ui/GeofencingAdmin';
+import InspectorsAdmin from './ui/InspectorsAdmin';
+import AdminLogin from './ui/AdminLogin';
+import AdminShell from './ui/admin/AdminShell';
+import {isAuthed, logout} from './lib/adminAuth';
 
 type Mode = 'idle' | 'enrolling' | 'verifying';
-type Page = 'live' | 'operations' | 'deployment' | 'aws';
+type Page = 'live' | 'operations' | 'deployment' | 'aws' | 'geofencing' | 'inspectors';
 type ModelState = 'loading' | 'ready' | 'error';
 interface LatencyBudget {
   recognizeMs: number;
@@ -70,9 +75,14 @@ const ROUTES: Record<Page, string> = {
   operations: '/operations',
   deployment: '/deployment',
   aws: '/aws',
+  geofencing: '/geofencing',
+  inspectors: '/inspectors',
 };
 
 function pageFromPath(pathname: string): Page {
+  if (pathname.startsWith('/inspectors')) {
+    return 'inspectors';
+  }
   if (pathname.startsWith('/aws')) {
     return 'aws';
   }
@@ -82,13 +92,37 @@ function pageFromPath(pathname: string): Page {
   if (pathname.startsWith('/deployment')) {
     return 'deployment';
   }
+  if (pathname.startsWith('/geofencing')) {
+    return 'geofencing';
+  }
   return 'live';
 }
 
 installNetMonitor();
 
-export default function App() {
+/**
+ * App — thin auth gate. The admin console (AdminShell) is the entire authed
+ * experience; the original hackathon demo below is retired but preserved as
+ * LegacyDemoConsole so its camera / face-api hooks never run in the admin.
+ */
+export default function App(): React.JSX.Element {
+  const [authed, setAuthed] = useState<boolean>(() => isAuthed());
+  if (!authed) {
+    return <AdminLogin onLogin={() => setAuthed(true)} />;
+  }
+  return (
+    <AdminShell
+      onSignOut={() => {
+        logout();
+        setAuthed(false);
+      }}
+    />
+  );
+}
+
+export function LegacyDemoConsole() {
   const [page, setPage] = useState<Page>(() => pageFromPath(window.location.pathname));
+  const [authed, setAuthed] = useState<boolean>(() => isAuthed());
   const [modelState, setModelState] = useState<ModelState>('loading');
   const [mode, setMode] = useState<Mode>('idle');
   const [userId, setUserId] = useState('');
@@ -531,6 +565,17 @@ export default function App() {
     status = ready ? 'locked' : 'standby';
   }
 
+  if (!authed) {
+    return (
+      <AdminLogin
+        onLogin={() => {
+          setAuthed(true);
+          navigate('inspectors');
+        }}
+      />
+    );
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -541,12 +586,18 @@ export default function App() {
             <span />
           </span>
           <div>
-            <div className="brand__name">Datalake Face Auth</div>
+            <div className="brand__name">Datalake Face Auth · Admin</div>
             <div className="brand__sub">Offline biometric authentication</div>
           </div>
         </div>
         <div className="sysmeta">
           <nav className="pagenav" aria-label="Demo pages">
+            <button
+              className={`pagenav__item ${page === 'inspectors' ? 'pagenav__item--active' : ''}`}
+              onClick={() => navigate('inspectors')}
+              data-testid="nav-inspectors">
+              Inspectors
+            </button>
             <button
               className={`pagenav__item ${page === 'live' ? 'pagenav__item--active' : ''}`}
               onClick={() => navigate('live')}
@@ -558,6 +609,12 @@ export default function App() {
               onClick={() => navigate('operations')}
               data-testid="nav-operations">
               Operations
+            </button>
+            <button
+              className={`pagenav__item ${page === 'geofencing' ? 'pagenav__item--active' : ''}`}
+              onClick={() => navigate('geofencing')}
+              data-testid="nav-geofencing">
+              Geofencing
             </button>
             <button
               className={`pagenav__item ${page === 'deployment' ? 'pagenav__item--active' : ''}`}
@@ -589,6 +646,16 @@ export default function App() {
             </button>
           )}
           <span className="sysmeta__id">NHAI · Datalake 3.0</span>
+          <button
+            className="voicebtn"
+            onClick={() => {
+              logout();
+              setAuthed(false);
+            }}
+            data-testid="logout"
+            title="Sign out of the admin console">
+            Sign out
+          </button>
         </div>
       </header>
 
@@ -657,6 +724,10 @@ export default function App() {
       )}
 
       {page === 'aws' && <AwsPage />}
+
+      {page === 'geofencing' && <GeofencingAdmin />}
+
+      {page === 'inspectors' && <InspectorsAdmin />}
 
       <footer className="footer">
         <span>On-device inference · no image leaves the browser</span>

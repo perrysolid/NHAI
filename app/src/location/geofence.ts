@@ -18,6 +18,24 @@ const EARTH_RADIUS_M = 6371008.8; // IUGG mean Earth radius
 
 const toRad = (deg: number): number => (deg * Math.PI) / 180;
 
+/** Initial bearing (degrees, 0=N, clockwise) from `from` toward `to`. */
+export function bearingDeg(from: LatLon, to: LatLon): number {
+  const lat1 = toRad(from.lat);
+  const lat2 = toRad(to.lat);
+  const dLon = toRad(to.lon - from.lon);
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  return (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360;
+}
+
+/** Nearest 8-point compass label ('N', 'NE', …) for a bearing in degrees. */
+export function compass8(deg: number): string {
+  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  return dirs[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
+}
+
 /** Great-circle distance between two lat/lon points, in metres. */
 export function haversineMeters(a: LatLon, b: LatLon): number {
   const dLat = toRad(b.lat - a.lat);

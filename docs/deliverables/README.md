@@ -15,16 +15,16 @@ adb install -r docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
 
 | File | Target device | Size | SHA-256 |
 |------|---------------|------|---------|
-| `DatalakeFaceAuth-android-universal-release.apk` | One APK for Android judge phones: arm64-v8a + armeabi-v7a | 70 MB | `04f5579cd497365dbd22cf427d0a72b92dcbf27522643a686870996e4a5e61c3` |
-| `DatalakeFaceAuth-android-arm64-v8a-release.apk` | Modern 64-bit Android phones | 51 MB | `52bce4494436f113085d59437a07b1610e5276c5fb6697ed4ebf44bf3dc6bd6d` |
-| `DatalakeFaceAuth-android-armeabi-v7a-release.apk` | Older 32-bit Android phones | 41 MB | `190bbc549913b4fc526f34df4d373633bb8c75320d280d6d0298dfeda3651b50` |
+| `DatalakeFaceAuth-android-universal-release.apk` | One APK for Android judge phones: arm64-v8a + armeabi-v7a | 70 MB | `22c63278f140ec204892e0a0b037219beb605684c78bb4627bad55c54a7497e1` |
+| `DatalakeFaceAuth-android-arm64-v8a-release.apk` | Modern 64-bit Android phones | 51 MB | `0720944bf42f737bd49732cf832c2bbb2342117668c36ce1daa497acf9bc3c46` |
+| `DatalakeFaceAuth-android-armeabi-v7a-release.apk` | Older 32-bit Android phones | 41 MB | `1494a349b7ea6b0c4cece3486fdac1fd691ac7a197db9e2f3bd95a8e48167308` |
 
 Package details:
 
 - App id: `com.datalakefaceauth`
-- Version: `1.8` (versionCode 9 — matches the in-app `v1.8 · build 9` tag)
+- Version: `2.2` (versionCode 13 — matches the in-app `v2.2 · build 13` tag)
 - Android minimum: API 26 / Android 8.0+
-- Auth path: fully offline; no network call is required for enrollment, liveness, recognition, matching, or queueing.
+- Auth path: verification is fully offline — liveness, recognition, matching, and queueing need no network. Enrollment is an online registration (template + role sent to the backend); attendance syncs when back online.
 - Bundled model assets were verified inside the release APK.
 - The Gradle release build also emits smaller ABI-split APKs locally if needed.
 

@@ -186,9 +186,7 @@ test('hands-free capture: centered face auto-enrolls and returns Home', async ()
   // verify UI on the same screen — proven by the Home-only "Verify" button and
   // the success banner it carries with it.
   expect(anyText(root, t => t === 'Verify')).toBe(true);
-  expect(anyText(root, t => t.startsWith('Enrollment saved offline'))).toBe(
-    true,
-  );
+  expect(anyText(root, t => t.startsWith('Enrollment saved'))).toBe(true);
 
   act(() => tree.unmount());
 });

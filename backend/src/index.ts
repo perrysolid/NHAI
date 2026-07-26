@@ -11,15 +11,40 @@
  */
 import express from 'express';
 import cors from 'cors';
-import {apiKeyGuard} from './auth.js';
+import {apiKeyGuard, adminGuard, generateAdminToken} from './auth.js';
 import {createStore, sanitizeMany} from './store.js';
+import {createSitesStore, sanitizeSite, ROLES} from './sites.js';
+import {createEnrollmentsStore, sanitizeEnrollment} from './enrollments.js';
 import {renderDashboard} from './dashboard.js';
 
 const app = express();
 const store = createStore();
+const sitesStore = createSitesStore();
+const enrollmentsStore = createEnrollmentsStore();
 
+// Tolerate trailing slashes and a comma-separated list of allowed origins, so a
+// stray "https://app.vercel.app/" in CORS_ORIGIN doesn't silently block the SPA.
+const stripSlash = (s: string) => s.trim().replace(/\/+$/, '');
+const allowedOrigins = stripSlash(process.env.CORS_ORIGIN ?? '*')
+  .split(',')
+  .map(stripSlash)
+  .filter(Boolean);
+const corsOrigin =
+  allowedOrigins.includes('*') || allowedOrigins.length === 0
+    ? '*'
+    : (
+        origin: string | undefined,
+        cb: (err: Error | null, allow?: boolean) => void,
+      ) => {
+        // Non-browser callers (no Origin header) and matching origins are allowed.
+        cb(null, !origin || allowedOrigins.includes(stripSlash(origin)));
+      };
 app.use(
-  cors({origin: process.env.CORS_ORIGIN ?? '*', methods: ['GET', 'POST']}),
+  cors({
+    origin: corsOrigin,
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'x-api-key'],
+  }),
 );
 app.use(express.json({limit: '1mb'}));
 
@@ -76,11 +101,21 @@ app.post('/api/sync', apiKeyGuard, async (req, res) => {
     return;
   }
   try {
-    const acceptedRecords = await store.add(records);
+    // Integrity guard: reject tampered records (bad scores, replayed
+    // timestamps, rate-limit bursts, cross-device timeline injection).
+    // Runs before the dedupe-aware add() so tampered records never
+    // occupy a slot in the primary key space.
+    const guarded = await store.guard(records);
+    if (guarded.length === 0) {
+      res.status(400).json({ok: false, error: 'all records rejected by integrity checks'});
+      return;
+    }
+    const acceptedRecords = await store.add(guarded);
     res.json({
       ok: true,
       accepted: acceptedRecords.length,
-      received: records.length,
+      received: guarded.length,
+      rejected: records.length - guarded.length,
       acceptedRecords,
     });
   } catch (e) {
@@ -90,7 +125,7 @@ app.post('/api/sync', apiKeyGuard, async (req, res) => {
   }
 });
 
-app.get('/api/records', apiKeyGuard, async (req, res) => {
+app.get('/api/records', adminGuard, async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 200, 1000);
   const since = Number(req.query.since) || 0;
   try {
@@ -99,6 +134,133 @@ app.get('/api/records', apiKeyGuard, async (req, res) => {
     res
       .status(500)
       .json({ok: false, error: e instanceof Error ? e.message : 'db error'});
+  }
+});
+
+// ── Admin login ──
+// Validates username/password against env and issues an ephemeral admin token
+// (a 64-char hex string). The web dashboard sends this as x-api-key on admin
+// calls. Independent of the device API_KEY — the key baked into the app binary
+// does not grant admin access. Tokens are in-memory: lost on server restart.
+app.post('/api/admin/login', (req, res) => {
+  const username = String(req.body?.username ?? '');
+  const password = String(req.body?.password ?? '');
+  const U = process.env.ADMIN_USER;
+  const P = process.env.ADMIN_PASSWORD;
+  if (!U || !P) {
+    res.status(500).json({
+      ok: false,
+      error: 'admin login not configured — set ADMIN_USER and ADMIN_PASSWORD',
+    });
+    return;
+  }
+  if (username === U && password === P) {
+    res.json({ok: true, token: generateAdminToken()});
+  } else {
+    res.status(401).json({ok: false, error: 'invalid username or password'});
+  }
+});
+
+// ── Enrollment (online) + admin registry ──
+// Device posts an on-device embedding + details; admin sees everyone enrolled;
+// a device can pull a template to verify that inspector offline.
+app.post('/api/enroll', apiKeyGuard, async (req, res) => {
+  const enrollment = sanitizeEnrollment(req.body);
+  if (!enrollment) {
+    res.status(400).json({
+      ok: false,
+      error: 'invalid enrollment: need userId and a non-empty embedding[]',
+    });
+    return;
+  }
+  try {
+    await enrollmentsStore.upsert(enrollment);
+    res.json({
+      ok: true,
+      userId: enrollment.userId,
+      embeddingLength: enrollment.embedding.length,
+    });
+  } catch (e) {
+    res.status(500).json({ok: false, error: e instanceof Error ? e.message : 'db error'});
+  }
+});
+
+app.get('/api/enrollments', adminGuard, async (_req, res) => {
+  try {
+    res.json({ok: true, enrollments: await enrollmentsStore.list()});
+  } catch (e) {
+    res.status(500).json({ok: false, error: e instanceof Error ? e.message : 'db error'});
+  }
+});
+
+app.get('/api/enrollments/for/:userId', apiKeyGuard, async (req, res) => {
+  try {
+    const enrollment = await enrollmentsStore.get(req.params.userId);
+    if (!enrollment) {
+      res.status(404).json({ok: false, error: 'not enrolled'});
+      return;
+    }
+    res.json({ok: true, enrollment});
+  } catch (e) {
+    res.status(500).json({ok: false, error: e instanceof Error ? e.message : 'db error'});
+  }
+});
+
+app.delete('/api/enrollments/:userId', adminGuard, async (req, res) => {
+  try {
+    res.json({ok: true, deleted: await enrollmentsStore.remove(req.params.userId)});
+  } catch (e) {
+    res.status(500).json({ok: false, error: e instanceof Error ? e.message : 'db error'});
+  }
+});
+
+// ── Geofence sites (admin provisioning + device pull) ──
+// The role list feeds the admin form's dropdown.
+app.get('/api/roles', (_req, res) => {
+  res.json({ok: true, roles: ROLES});
+});
+
+// Admin: list every provisioned site.
+app.get('/api/sites', adminGuard, async (_req, res) => {
+  try {
+    res.json({ok: true, sites: await sitesStore.list()});
+  } catch (e) {
+    res.status(500).json({ok: false, error: e instanceof Error ? e.message : 'db error'});
+  }
+});
+
+// Admin: create or update a site (assign a circular zone to an inspector).
+app.post('/api/sites', adminGuard, async (req, res) => {
+  const site = sanitizeSite(req.body);
+  if (!site) {
+    res.status(400).json({
+      ok: false,
+      error: 'invalid site: need name, assignedUserId and a circle shape {center:{lat,lon}, radiusM>0}',
+    });
+    return;
+  }
+  try {
+    res.json({ok: true, site: await sitesStore.upsert(site)});
+  } catch (e) {
+    res.status(500).json({ok: false, error: e instanceof Error ? e.message : 'db error'});
+  }
+});
+
+// Admin: delete a site.
+app.delete('/api/sites/:id', adminGuard, async (req, res) => {
+  try {
+    res.json({ok: true, deleted: await sitesStore.remove(req.params.id)});
+  } catch (e) {
+    res.status(500).json({ok: false, error: e instanceof Error ? e.message : 'db error'});
+  }
+});
+
+// Device: pull the site(s) assigned to this inspector, to cache offline.
+app.get('/api/sites/for/:userId', apiKeyGuard, async (req, res) => {
+  try {
+    res.json({ok: true, sites: await sitesStore.forUser(req.params.userId)});
+  } catch (e) {
+    res.status(500).json({ok: false, error: e instanceof Error ? e.message : 'db error'});
   }
 });
 
@@ -121,8 +283,7 @@ app.get('/admin', async (req, res) => {
 });
 
 const port = Number(process.env.PORT) || 4000;
-store
-  .init()
+Promise.all([store.init(), sitesStore.init(), enrollmentsStore.init()])
   .then(() => {
     app.listen(port, () => {
       // eslint-disable-next-line no-console
