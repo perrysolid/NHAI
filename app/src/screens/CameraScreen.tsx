@@ -184,7 +184,7 @@ const ENROLL_ROLES: {id: string; label: string}[] = [
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
 // Bump alongside android versionName so a screenshot reveals the running build.
-const APP_VERSION = 'v2.5 · build 16';
+const APP_VERSION = 'v2.6 · build 17';
 
 /**
  * One downscaled full-frame RGB buffer plus the face box already scaled into its
@@ -1072,7 +1072,9 @@ export default function CameraScreen(): React.JSX.Element {
       setVerdict({
         ok: true,
         title: composite.lowTrust ? 'Matched · review' : 'Matched offline',
-        detail: `${verify.userId} · score ${composite.overall}/100${
+        detail: `${verify.userId} · match ${(verify.matchScore * 100).toFixed(
+          0,
+        )}% · score ${composite.overall}/100${
           location ? ` · ${geofenceReasonText(geo)}` : ''
         }`,
         score: composite.overall,

@@ -1,5 +1,5 @@
 import {computeComposite, confidenceFromCosine} from '../scoring';
-import {SCORING} from '../../config';
+import {SCORING, THRESHOLDS} from '../../config';
 
 describe('composite scoring', () => {
   it('weights sum to 1', () => {
@@ -11,7 +11,11 @@ describe('composite scoring', () => {
     expect(confidenceFromCosine(0.9)).toBeGreaterThan(
       confidenceFromCosine(0.5),
     );
-    expect(confidenceFromCosine(0.55)).toBeCloseTo(0.5, 1); // boundary
+    // Confidence crosses 0.5 exactly at the accept threshold (the boundary).
+    expect(confidenceFromCosine(THRESHOLDS.recognitionCosine)).toBeCloseTo(
+      0.5,
+      1,
+    );
   });
 
   it('scores an ideal capture near 100', () => {

@@ -135,8 +135,11 @@ export const LIVENESS_MODEL: LivenessSpec = {
 // Thresholds & gates
 // ────────────────────────────────────────────────────────────────────────────
 export const THRESHOLDS = {
-  /** Cosine similarity >= this means the same person. */
-  recognitionCosine: 0.55,
+  /** Cosine similarity >= this means the same person. Raised from 0.55 to reduce
+   *  false accepts. NOTE: the real fix for two different faces matching is face
+   *  ALIGNMENT (eye-based), not the threshold — without alignment the genuine and
+   *  impostor cosine distributions overlap and no threshold cleanly separates them. */
+  recognitionCosine: 0.62,
   /** Passive anti-spoof "live" probability must exceed this. Only enforced when
    *  FLAGS.REQUIRE_PASSIVE_LIVENESS is true; otherwise it is advisory (recorded
    *  but non-blocking) so an uncalibrated MiniFASNet can't false-reject a real
