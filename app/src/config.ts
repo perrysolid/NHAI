@@ -11,6 +11,7 @@
  */
 
 import type {Site} from './location/types';
+import {SYNC_URL, SYNC_API_KEY} from './secrets';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Feature flags
@@ -25,11 +26,20 @@ export const FLAGS = {
   USE_LIVE_FRAMES: true,
   /** Verbose per-stage latency logging to Metro console. */
   LOG_LATENCY: true,
-  /** When true, verify also requires the passive MiniFASNet score to clear
-   *  THRESHOLDS.livenessPassive. Left false by default: the passive model isn't
-   *  device-calibrated, so it's recorded but non-blocking to avoid false
-   *  rejects — the active motion challenge carries the anti-spoof guarantee. */
+  /** Strict mode: verify requires the passive score to clear THRESHOLDS
+   *  .livenessPassive (a hard AND with the active challenge). Off by default. */
   REQUIRE_PASSIVE_LIVENESS: false,
+  /** Screen/print-replay defence: reject when the passive MiniFASNet score is
+   *  CONFIDENTLY low (< THRESHOLDS.livenessPassiveFloor) — this is what catches a
+   *  video played on a second phone (a screen has texture/moiré a live face
+   *  doesn't). Soft floor (not the full 0.5 threshold) so a real face near the
+   *  boundary isn't false-rejected. Calibrate the floor on-device before relying
+   *  on it; flip false if it rejects real faces. */
+  // Disabled: on-device the bundled MiniFASNet scores real faces below the floor
+  // (false-rejects), so blocking on it breaks live verification. The randomized
+  // active blink/smile/turn challenge remains the anti-spoof. Re-enable only after
+  // validating the passive model on this hardware (a calibration task).
+  PASSIVE_SCREEN_BLOCK: false,
 } as const;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -100,6 +110,11 @@ export interface LivenessSpec {
   /** softmax index that means "real/live". */
   liveClassIndex: number;
   dtype: 'float32' | 'uint8';
+  /** Channel order the model expects. Silent-Face / MiniFASNet was trained on
+   *  OpenCV (BGR) images, so 'bgr' is the correct default — a mismatch here is
+   *  the most likely reason the passive score looked unreliable. Calibrate on a
+   *  device: a real face should score high, a phone-screen replay low. */
+  channelOrder: 'rgb' | 'bgr';
 }
 
 // MiniFASNetV2-SE (Silent-Face-Anti-Spoofing, Apache-2.0).
@@ -113,19 +128,27 @@ export const LIVENESS_MODEL: LivenessSpec = {
   bboxExpansion: 2.7,
   liveClassIndex: 1,
   dtype: 'float32',
+  channelOrder: 'bgr',
 };
 
 // ────────────────────────────────────────────────────────────────────────────
 // Thresholds & gates
 // ────────────────────────────────────────────────────────────────────────────
 export const THRESHOLDS = {
-  /** Cosine similarity >= this means the same person. */
-  recognitionCosine: 0.55,
+  /** Cosine similarity >= this means the same person. Raised from 0.55 to reduce
+   *  false accepts. NOTE: the real fix for two different faces matching is face
+   *  ALIGNMENT (eye-based), not the threshold — without alignment the genuine and
+   *  impostor cosine distributions overlap and no threshold cleanly separates them. */
+  recognitionCosine: 0.62,
   /** Passive anti-spoof "live" probability must exceed this. Only enforced when
    *  FLAGS.REQUIRE_PASSIVE_LIVENESS is true; otherwise it is advisory (recorded
    *  but non-blocking) so an uncalibrated MiniFASNet can't false-reject a real
    *  face. The active motion challenge is the primary defeat-a-photo mechanism. */
   livenessPassive: 0.5,
+  /** Screen-replay floor (see FLAGS.PASSIVE_SCREEN_BLOCK). Reject only when the
+   *  passive "live" probability is CONFIDENTLY below this — obvious screens score
+   *  low, real faces well above. Conservative so a borderline real face passes. */
+  livenessPassiveFloor: 0.3,
   /** Minimum range the eye-open signal must span during a verify attempt — a
    *  real blink swings ~0.8; a held photo stays flat. Defeats static spoofs. */
   livenessMotionRange: 0.2,
@@ -216,12 +239,11 @@ export const CAMERA = {
 // Sync (offline → online). NEVER referenced in the auth path.
 // ────────────────────────────────────────────────────────────────────────────
 export const SYNC = {
-  /** Live Render backend. `/api/enroll`, `/api/sync`, `/api/sites/...` all derive
-   *  from this origin. */
-  url: 'https://datalake-face-sync.onrender.com/api/sync',
-  /** Shared secret sent as x-api-key (must equal the backend's API_KEY). NOTE:
-   *  baked into the APK for the demo — rotate on the server for production. */
-  apiKey: 'sy15nCPtxnzsZHe36EYq7lRToEf8EcA2l5We0rWeBCQ=',
+  /** Backend origin + device key are read from the GITIGNORED secrets file, so
+   *  they aren't committed to source. `/api/enroll`, `/api/sync`, `/api/sites/…`
+   *  all derive from SYNC_URL's origin. See secrets.example.ts. */
+  url: SYNC_URL,
+  apiKey: SYNC_API_KEY,
   batchSize: 50,
 } as const;
 

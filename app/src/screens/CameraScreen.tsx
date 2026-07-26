@@ -116,7 +116,7 @@ const ENROLL_ROLES: {id: string; label: string}[] = [
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
 // Bump alongside android versionName so a screenshot reveals the running build.
-const APP_VERSION = 'v2.2 · build 13';
+const APP_VERSION = 'v2.6 · build 17';
 
 /**
  * One downscaled full-frame RGB buffer plus the face box already scaled into its
@@ -875,11 +875,17 @@ export default function CameraScreen(): React.JSX.Element {
       ]);
       const verify = store.verify(probe);
       const dual = evaluateDualLiveness({passiveScore, activeStatus});
-      // Active motion challenge is the hard requirement; the passive MiniFASNet
-      // score is advisory unless REQUIRE_PASSIVE_LIVENESS is on (see config).
-      const livePassed = FLAGS.REQUIRE_PASSIVE_LIVENESS
-        ? dual.passed
-        : dual.activePassed;
+      // Screen/print-replay defence: a confidently-low passive score means the
+      // camera is looking at a screen or print, not a live face — this is what
+      // stops a video played on a second phone.
+      const screenReplay =
+        FLAGS.PASSIVE_SCREEN_BLOCK &&
+        passiveScore < THRESHOLDS.livenessPassiveFloor;
+      // Active motion challenge is the hard requirement; passive is advisory
+      // unless REQUIRE_PASSIVE_LIVENESS is on. A screen-replay always blocks.
+      const livePassed =
+        (FLAGS.REQUIRE_PASSIVE_LIVENESS ? dual.passed : dual.activePassed) &&
+        !screenReplay;
       const confidence = confidenceFromCosine(Math.max(0, verify.matchScore));
       const composite = computeComposite({
         recognitionConfidence: confidence,
@@ -941,8 +947,12 @@ export default function CameraScreen(): React.JSX.Element {
         showVerifyResult('failure');
         setVerdict({
           ok: false,
-          title: 'Liveness blocked',
-          detail: `Passive score ${(passiveScore * 100).toFixed(0)}%`,
+          title: screenReplay ? 'Screen / replay blocked' : 'Liveness blocked',
+          detail: screenReplay
+            ? `Not a live face — passive anti-spoof ${(
+                passiveScore * 100
+              ).toFixed(0)}%`
+            : `Passive score ${(passiveScore * 100).toFixed(0)}%`,
           score: composite.overall,
           latencyMs,
         });
@@ -992,7 +1002,9 @@ export default function CameraScreen(): React.JSX.Element {
       setVerdict({
         ok: true,
         title: composite.lowTrust ? 'Matched · review' : 'Matched offline',
-        detail: `${verify.userId} · score ${composite.overall}/100${
+        detail: `${verify.userId} · match ${(verify.matchScore * 100).toFixed(
+          0,
+        )}% · score ${composite.overall}/100${
           location ? ` · ${geofenceReasonText(geo)}` : ''
         }`,
         score: composite.overall,
