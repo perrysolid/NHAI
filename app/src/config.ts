@@ -35,7 +35,11 @@ export const FLAGS = {
    *  doesn't). Soft floor (not the full 0.5 threshold) so a real face near the
    *  boundary isn't false-rejected. Calibrate the floor on-device before relying
    *  on it; flip false if it rejects real faces. */
-  PASSIVE_SCREEN_BLOCK: true,
+  // Disabled: on-device the bundled MiniFASNet scores real faces below the floor
+  // (false-rejects), so blocking on it breaks live verification. The randomized
+  // active blink/smile/turn challenge remains the anti-spoof. Re-enable only after
+  // validating the passive model on this hardware (a calibration task).
+  PASSIVE_SCREEN_BLOCK: false,
 } as const;
 
 // ────────────────────────────────────────────────────────────────────────────
