@@ -8,6 +8,7 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Linking,
   Modal,
@@ -47,7 +48,7 @@ import {
 import {evaluateGeofence} from '../location/geofence';
 import {fetchAssignedSites, baseUrlFromSyncUrl} from '../location/provisioning';
 import {createLocationProvider} from '../location/locationProvider';
-import type {GeofenceResult, LocationFix} from '../location/types';
+import type {GeofenceResult, LocationFix, Site} from '../location/types';
 import type {RecordLocation} from '../auth/offlineStore';
 import {evaluateFace} from '../camera/qualityGates';
 import {meanLuma} from '../camera/frameUtils';
@@ -116,7 +117,7 @@ const ENROLL_ROLES: {id: string; label: string}[] = [
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
 // Bump alongside android versionName so a screenshot reveals the running build.
-const APP_VERSION = 'v2.8 · build 19';
+const APP_VERSION = 'v2.9 · build 20';
 
 /**
  * One downscaled full-frame RGB buffer plus the face box already scaled into its
@@ -146,6 +147,18 @@ const INITIAL_GATE: GateResult = {
 
 function createInspectorId(): string {
   return `inspector_${Date.now().toString(36).slice(-6)}`;
+}
+
+/** One-line summary of the provisioned geofence zone(s) for the settings sheet. */
+function summarizeSites(sites: Site[]): string {
+  if (sites.length === 0) {
+    return 'No site configured';
+  }
+  const s = sites[0];
+  const extra =
+    s.shape.kind === 'circle' ? ` · ${s.shape.radiusM}m` : ' · area';
+  const more = sites.length > 1 ? ` +${sites.length - 1}` : '';
+  return `${s.name}${extra}${more}`;
 }
 
 /** Short human summary of a geofence outcome for the verdict line. */
@@ -191,6 +204,10 @@ export default function CameraScreen(): React.JSX.Element {
   } | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
+  // On-device geofence zone summary shown in the settings sheet, plus a busy
+  // flag while the "pin geofence here" action waits for a GPS fix.
+  const [siteSummary, setSiteSummary] = useState('No site configured');
+  const [pinning, setPinning] = useState(false);
   const [geoStatus, setGeoStatus] = useState<{
     reason: string;
     siteName?: string;
@@ -1179,12 +1196,62 @@ export default function CameraScreen(): React.JSX.Element {
     enrollSamplesRef.current = [];
     setEnrollStepIndex(0);
     refreshCounts();
+    setSiteSummary(summarizeSites(store.getSites()));
     setVerdict({
       ok: true,
       title: 'Local demo reset',
       detail: 'Enrollments and queue cleared on this device',
     });
   }, [refreshCounts, store]);
+
+  // Refresh the settings-sheet zone summary whenever the sheet opens, so it
+  // reflects sites just provisioned via Sync (or a prior device pin).
+  useEffect(() => {
+    if (profileOpen) {
+      setSiteSummary(summarizeSites(store.getSites()));
+    }
+  }, [profileOpen, store]);
+
+  // "Pin geofence to my location" — capture the current GPS fix and save it as a
+  // circular site on-device. Works with zero admin/backend/userId dependency, so
+  // the geofence is guaranteed to be centred exactly where the phone is standing.
+  const onPinGeofence = useCallback(async () => {
+    setPinning(true);
+    try {
+      const fix = await locationProvider.getFix({
+        timeoutMs: GEOFENCE.fixTimeoutMs,
+        maxAgeMs: GEOFENCE.maxFixAgeMs,
+      });
+      if (!fix) {
+        Alert.alert(
+          'No GPS fix',
+          'Could not get a location. GPS needs open sky — go near a window or step outside, then try again.',
+        );
+        return;
+      }
+      const site: Site = {
+        id: 'device-pin',
+        name: 'Pinned location',
+        shape: {
+          kind: 'circle',
+          center: {lat: fix.lat, lon: fix.lon},
+          radiusM: GEOFENCE.pinRadiusM,
+        },
+      };
+      store.saveSites([site]);
+      latestFixRef.current = fix;
+      setSiteSummary(summarizeSites([site]));
+      Alert.alert(
+        'Geofence pinned here',
+        `Centred on this spot (GPS ±${Math.round(fix.accuracyM)} m) with a ${
+          GEOFENCE.pinRadiusM
+        } m radius. Verify now checks against ` +
+          'this location — fully offline.',
+      );
+    } finally {
+      setPinning(false);
+    }
+  }, [locationProvider, store]);
 
   if (page === 'home') {
     return (
@@ -1211,6 +1278,9 @@ export default function CameraScreen(): React.JSX.Element {
           onToggleLang={toggleLang}
           onReset={onClearLocal}
           onClose={() => setProfileOpen(false)}
+          geofenceLabel={siteSummary}
+          pinning={pinning}
+          onPinGeofence={onPinGeofence}
         />
       </>
     );
@@ -1311,7 +1381,9 @@ export default function CameraScreen(): React.JSX.Element {
   // "chaotic" jump the enroll flow must not do anymore.
   if (mode === 'enroll') {
     const enrollBusy = busy || engineState !== 'ready' || enrollComplete;
-    const currentStep = enrollComplete ? null : LIVENESS_ACTIONS[enrollStepIndex];
+    const currentStep = enrollComplete
+      ? null
+      : LIVENESS_ACTIONS[enrollStepIndex];
     const stepPrompt = enrollStepGuidance(currentStep ?? 'done');
     const overlayText = enrollComplete
       ? stepPrompt
@@ -1654,6 +1726,9 @@ function ProfilePanel({
   onToggleLang,
   onReset,
   onClose,
+  geofenceLabel,
+  pinning,
+  onPinGeofence,
 }: {
   visible: boolean;
   identity: {userId: string; role?: string} | null;
@@ -1665,6 +1740,9 @@ function ProfilePanel({
   onToggleLang: () => void;
   onReset: () => void;
   onClose: () => void;
+  geofenceLabel: string;
+  pinning: boolean;
+  onPinGeofence: () => void;
 }): React.JSX.Element {
   return (
     <Modal
@@ -1714,6 +1792,21 @@ function ProfilePanel({
           />
           <SettingRow label="Pending records" value={String(pending)} />
           <SettingRow label="App version" value={APP_VERSION} />
+
+          <Text style={styles.sheetSection}>GEOFENCE</Text>
+          <SettingRow
+            label="Assigned zone"
+            value={geofenceLabel}
+            active={geofenceLabel !== 'No site configured'}
+          />
+          <TouchableOpacity
+            style={[styles.secondaryButton, pinning && styles.disabledButton]}
+            onPress={onPinGeofence}
+            disabled={pinning}>
+            <Text style={styles.secondaryButtonText}>
+              {pinning ? 'Getting GPS fix…' : 'Pin geofence to my location'}
+            </Text>
+          </TouchableOpacity>
 
           <Text style={styles.sheetSection}>DEVICE</Text>
           <TouchableOpacity style={styles.dangerButton} onPress={onReset}>

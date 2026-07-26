@@ -1,3 +1,4 @@
+/* eslint-env jest */
 // Disable real network in unit tests. Node 20+/24 ships a global fetch, and the
 // app now has a live SYNC.url baked in — without this, tests that touch the
 // enroll/sync path would POST junk to the real backend. Code that needs the

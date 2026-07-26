@@ -109,7 +109,10 @@ class MemorySitesStore implements SitesStore {
     return [...this.byId.values()].sort((a, b) => b.updatedAt - a.updatedAt);
   }
   async forUser(userId: string): Promise<Site[]> {
-    return (await this.list()).filter(s => s.assignedUserId === userId);
+    const needle = userId.trim().toLowerCase();
+    return (await this.list()).filter(
+      s => s.assignedUserId.trim().toLowerCase() === needle,
+    );
   }
   async remove(id: string): Promise<boolean> {
     return this.byId.delete(id);
@@ -170,7 +173,7 @@ class PostgresSitesStore implements SitesStore {
   }
   async forUser(userId: string): Promise<Site[]> {
     const res = await this.pool.query(
-      'SELECT * FROM sites WHERE assigned_user_id=$1 ORDER BY updated_at DESC',
+      'SELECT * FROM sites WHERE lower(trim(assigned_user_id))=lower(trim($1)) ORDER BY updated_at DESC',
       [userId],
     );
     return res.rows.map(r => this.mapRow(r));
@@ -244,7 +247,9 @@ class SupabaseSitesStore implements SitesStore {
     const {data, error} = await this.db
       .from('sites')
       .select('*')
-      .eq('assigned_user_id', userId)
+      // ilike (no wildcards) = case-insensitive exact match; stored ids are
+      // already trimmed on save, so trimming the query is enough.
+      .ilike('assigned_user_id', userId.trim())
       .order('updated_at', {ascending: false});
     if (error) {
       throw new Error(error.message);

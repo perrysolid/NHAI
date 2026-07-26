@@ -4,7 +4,7 @@ module.exports = {
   __esModule: true,
   default: {
     requestAuthorization: jest.fn(() => Promise.resolve('granted')),
-    getCurrentPosition: jest.fn((success) => {
+    getCurrentPosition: jest.fn(success => {
       success({
         coords: {latitude: 0, longitude: 0, accuracy: 10},
         mocked: false,

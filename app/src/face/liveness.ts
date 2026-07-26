@@ -91,7 +91,10 @@ export class ActiveLivenessChallenge {
     const done = this.status === 'passed' ? this.actions.length : this.index;
     const msLeft =
       this.status === 'running'
-        ? Math.max(0, THRESHOLDS.activeChallengeTimeoutMs - (now - this.startedAt))
+        ? Math.max(
+            0,
+            THRESHOLDS.activeChallengeTimeoutMs - (now - this.startedAt),
+          )
         : 0;
     let guidance = '';
     if (this.status === 'running') {

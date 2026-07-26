@@ -65,8 +65,7 @@ jest.mock('react-native-vision-camera-face-detector', () => {
         // frames reliably swing at least +-headTurnDeltaDeg past it in BOTH
         // directions within a couple of seconds. Bounded well under
         // maxYawDeg=45 throughout.
-        const yaw =
-          20 * Math.sin(frame * 0.31) + 15 * Math.sin(frame * 0.13);
+        const yaw = 20 * Math.sin(frame * 0.31) + 15 * Math.sin(frame * 0.13);
         return [
           {
             bounds: {x: 144, y: 128, width: 192, height: 192}, // ratio 0.4

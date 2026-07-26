@@ -253,8 +253,14 @@ export const SYNC = {
 // decision for identity; it's an independent presence signal on the record.
 // ────────────────────────────────────────────────────────────────────────────
 export const GEOFENCE = {
-  /** Reject GPS fixes whose horizontal accuracy radius exceeds this (metres). */
-  maxAccuracyM: 50,
+  /** Reject GPS fixes whose horizontal accuracy radius exceeds this (metres).
+   *  100 m (not 50) because a phone genuinely on-site often reports a 30–70 m
+   *  radius — especially offline (no A-GPS) or near buildings — and rejecting
+   *  those as "poor accuracy" made real on-site checks fail. */
+  maxAccuracyM: 100,
+  /** Radius (metres) of the circle created by the on-device "Pin geofence to my
+   *  location" action. Comfortably covers a site/room around the pinned point. */
+  pinRadiusM: 150,
   /** Fail the geofence when the OS flags the fix as a mock / fake-GPS provider. */
   rejectMocked: true,
   /** When true a verify OUTSIDE the geofence (or mocked) is BLOCKED, not just

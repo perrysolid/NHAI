@@ -77,12 +77,10 @@ describe('ActiveLivenessChallenge', () => {
   it('both actions must complete for challenge to pass', () => {
     const c = new ActiveLivenessChallenge(Math.random, ['smile', 'blink']);
     c.start(0);
-    expect(
-      c.update(face({smilingProbability: 0.95}), 100).status,
-    ).toBe('running');
-    expect(
-      c.update(open, 2000).status,
-    ).toBe('running');
+    expect(c.update(face({smilingProbability: 0.95}), 100).status).toBe(
+      'running',
+    );
+    expect(c.update(open, 2000).status).toBe('running');
   });
 
   it('missing first action (turn) cannot skip ahead to second action (blink)', () => {
