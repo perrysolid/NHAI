@@ -101,11 +101,21 @@ app.post('/api/sync', apiKeyGuard, async (req, res) => {
     return;
   }
   try {
-    const acceptedRecords = await store.add(records);
+    // Integrity guard: reject tampered records (bad scores, replayed
+    // timestamps, rate-limit bursts, cross-device timeline injection).
+    // Runs before the dedupe-aware add() so tampered records never
+    // occupy a slot in the primary key space.
+    const guarded = await store.guard(records);
+    if (guarded.length === 0) {
+      res.status(400).json({ok: false, error: 'all records rejected by integrity checks'});
+      return;
+    }
+    const acceptedRecords = await store.add(guarded);
     res.json({
       ok: true,
       accepted: acceptedRecords.length,
-      received: records.length,
+      received: guarded.length,
+      rejected: records.length - guarded.length,
       acceptedRecords,
     });
   } catch (e) {
