@@ -17,8 +17,9 @@ import type {Site} from './location/types';
 // ────────────────────────────────────────────────────────────────────────────
 export const FLAGS = {
   /** When true, sync POSTs are simulated (200 OK) so the offline demo can show
-   *  the sync→purge lifecycle without a live backend. Default true. */
-  MOCK_MODE: true,
+   *  the sync→purge lifecycle without a live backend. Now wired to the live
+   *  Render backend, so real POSTs go out. */
+  MOCK_MODE: false,
   /** When false, fall back to still-image inference (runOnImage) instead of
    *  live camera frames — a Plan B if live frame processing misbehaves. */
   USE_LIVE_FRAMES: true,
@@ -215,10 +216,12 @@ export const CAMERA = {
 // Sync (offline → online). NEVER referenced in the auth path.
 // ────────────────────────────────────────────────────────────────────────────
 export const SYNC = {
-  /** AWS/Render-compatible endpoint. Filled in once the sync service is deployed. */
-  url: 'https://YOUR-SYNC-ENDPOINT/api/sync',
-  /** Shared secret sent as x-api-key. Move to secure storage for production. */
-  apiKey: 'CHANGE_ME',
+  /** Live Render backend. `/api/enroll`, `/api/sync`, `/api/sites/...` all derive
+   *  from this origin. */
+  url: 'https://datalake-face-sync.onrender.com/api/sync',
+  /** Shared secret sent as x-api-key (must equal the backend's API_KEY). NOTE:
+   *  baked into the APK for the demo — rotate on the server for production. */
+  apiKey: 'sy15nCPtxnzsZHe36EYq7lRToEf8EcA2l5We0rWeBCQ=',
   batchSize: 50,
 } as const;
 

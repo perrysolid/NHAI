@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Image,
   Linking,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -30,6 +31,7 @@ import {
 } from 'react-native-vision-camera-face-detector';
 import {useResizePlugin} from 'vision-camera-resize-plugin';
 import {Worklets} from 'react-native-worklets-core';
+import NetInfo from '@react-native-community/netinfo';
 
 import {
   ACTIVE_RECOGNITION,
@@ -170,10 +172,19 @@ const ENROLL_STEP_LABEL: Record<EnrollStepKind, string> = {
   turn: 'Turn head',
 };
 
+/** Datalake field roles, chosen at enrollment and synced to the backend. */
+const ENROLL_ROLES: {id: string; label: string}[] = [
+  {id: 'authority-engineer', label: 'Authority Engineer'},
+  {id: 'contractor', label: 'Contractor'},
+  {id: 'piu', label: 'PIU team'},
+  {id: 'regional-officer', label: 'Regional Officer'},
+  {id: 'consultant', label: 'Consultant'},
+];
+
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
 // Bump alongside android versionName so a screenshot reveals the running build.
-const APP_VERSION = 'v1.8 · build 9';
+const APP_VERSION = 'v1.9 · build 10';
 
 /**
  * One downscaled full-frame RGB buffer plus the face box already scaled into its
@@ -234,6 +245,7 @@ export default function CameraScreen(): React.JSX.Element {
   const [page, setPage] = useState<Page>('home');
   const [mode, setMode] = useState<Mode>('enroll');
   const [userId, setUserId] = useState('');
+  const [role, setRole] = useState('authority-engineer');
   const [engineState, setEngineState] = useState<EngineState>('loading');
   const [engineError, setEngineError] = useState('');
   // Which guided step (ENROLL_STEPS index) enrollment is currently on/has
@@ -241,6 +253,12 @@ export default function CameraScreen(): React.JSX.Element {
   const [enrollStepIndex, setEnrollStepIndex] = useState(0);
   const [enrolled, setEnrolled] = useState(0);
   const [pending, setPending] = useState(0);
+  const [identity, setIdentity] = useState<{
+    userId: string;
+    role?: string;
+  } | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   const [liveness, setLiveness] = useState<LivenessSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
@@ -321,11 +339,22 @@ export default function CameraScreen(): React.JSX.Element {
   const refreshCounts = useCallback(() => {
     setEnrolled(store.listEnrollments().length);
     setPending(store.getPendingQueue().length);
+    const latest = store.latestEnrollment();
+    setIdentity(latest ? {userId: latest.userId, role: latest.role} : null);
   }, [store]);
 
   useEffect(() => {
     refreshCounts();
   }, [refreshCounts]);
+
+  // Track connectivity so enrollment (an online-only action) can be gated
+  // synchronously without awaiting a fetch in the button handler.
+  useEffect(() => {
+    const unsub = NetInfo.addEventListener(state => {
+      setIsOnline(state.isConnected !== false);
+    });
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     setSpeechEnabled(voice);
@@ -588,6 +617,18 @@ export default function CameraScreen(): React.JSX.Element {
   }, [requestPermission]);
 
   const openEnrollSetup = useCallback(() => {
+    // Enrollment is an ONLINE event — the template + details must reach the
+    // central backend. Verification stays fully offline. Block enroll when there
+    // is no connectivity so a template isn't stranded on-device.
+    if (!isOnline) {
+      setVerdict({
+        ok: false,
+        title: 'Internet required to enrol',
+        detail:
+          'Connect to a network to register a new inspector. Verification still works offline.',
+      });
+      return;
+    }
     setMode('enroll');
     setPage('enroll_id');
     setVerdict(null);
@@ -595,7 +636,7 @@ export default function CameraScreen(): React.JSX.Element {
     setEnrollComplete(false);
     enrollSamplesRef.current = [];
     enrollGestureRef.current = freshEnrollGestureState();
-  }, []);
+  }, [isOnline]);
 
   const openEnrollCamera = useCallback(() => {
     const id = userId.trim();
@@ -725,7 +766,7 @@ export default function CameraScreen(): React.JSX.Element {
       enrollGestureRef.current = freshEnrollGestureState();
       if (nextIndex >= ENROLL_STEPS.length) {
         const samples = [...enrollSamplesRef.current];
-        store.saveEnrollment(id, samples);
+        store.saveEnrollment(id, samples, undefined, role);
         enrollSamplesRef.current = [];
         // Best-effort ONLINE enrollment: push the averaged template + details to
         // the central backend so the admin registry sees this inspector. The
@@ -736,6 +777,7 @@ export default function CameraScreen(): React.JSX.Element {
             baseUrl: baseUrlFromSyncUrl(SYNC.url),
             apiKey: SYNC.apiKey,
             userId: id,
+            role,
             embedding: averageEmbeddings(samples),
             deviceId: store.getDeviceId(),
             samples: samples.length,
@@ -777,7 +819,15 @@ export default function CameraScreen(): React.JSX.Element {
     } finally {
       setBusy(false);
     }
-  }, [captureEmbedding, enrollStepIndex, goHome, refreshCounts, store, userId]);
+  }, [
+    captureEmbedding,
+    enrollStepIndex,
+    goHome,
+    refreshCounts,
+    role,
+    store,
+    userId,
+  ]);
 
   // Autonomous enrollment capture is triggered directly from onSignals (every
   // processed frame) the instant a step's pose is confirmed — see the
@@ -1130,16 +1180,31 @@ export default function CameraScreen(): React.JSX.Element {
 
   if (page === 'home') {
     return (
-      <HomePage
-        enrolled={enrolled}
-        pending={pending}
-        verdict={verdict}
-        syncing={syncing}
-        onEnroll={openEnrollSetup}
-        onVerify={openVerifyCamera}
-        onSync={onSync}
-        onReset={onClearLocal}
-      />
+      <>
+        <HomePage
+          identity={identity}
+          enrolled={enrolled}
+          pending={pending}
+          verdict={verdict}
+          syncing={syncing}
+          onEnroll={openEnrollSetup}
+          onVerify={openVerifyCamera}
+          onSync={onSync}
+          onOpenProfile={() => setProfileOpen(true)}
+        />
+        <ProfilePanel
+          visible={profileOpen}
+          identity={identity}
+          voice={voice}
+          lang={lang}
+          pending={pending}
+          online={isOnline}
+          onToggleVoice={() => setVoice(v => !v)}
+          onToggleLang={toggleLang}
+          onReset={onClearLocal}
+          onClose={() => setProfileOpen(false)}
+        />
+      </>
     );
   }
 
@@ -1147,8 +1212,10 @@ export default function CameraScreen(): React.JSX.Element {
     return (
       <EnrollIdPage
         userId={userId}
+        role={role}
         verdict={verdict}
         onChangeUserId={setUserId}
+        onChangeRole={setRole}
         onGenerate={() => {
           setUserId(createInspectorId());
           setVerdict(null);
@@ -1451,7 +1518,24 @@ export default function CameraScreen(): React.JSX.Element {
   );
 }
 
+function roleLabel(role?: string): string {
+  return (
+    ENROLL_ROLES.find(r => r.id === role)?.label ??
+    (role ? role : 'Field inspector')
+  );
+}
+
+function initialsFor(id: string): string {
+  return (
+    id
+      .replace(/[^a-zA-Z0-9]/g, '')
+      .slice(0, 2)
+      .toUpperCase() || 'NH'
+  );
+}
+
 function HomePage({
+  identity,
   enrolled,
   pending,
   verdict,
@@ -1459,8 +1543,9 @@ function HomePage({
   onEnroll,
   onVerify,
   onSync,
-  onReset,
+  onOpenProfile,
 }: {
+  identity: {userId: string; role?: string} | null;
   enrolled: number;
   pending: number;
   verdict: Verdict | null;
@@ -1468,24 +1553,54 @@ function HomePage({
   onEnroll: () => void;
   onVerify: () => void;
   onSync: () => void;
-  onReset: () => void;
+  onOpenProfile: () => void;
 }): React.JSX.Element {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.home}>
+      <View style={styles.homeTopBar}>
+        <Text style={styles.kicker}>DATALAKE 3.0 FIELD AUTH</Text>
+        <TouchableOpacity
+          style={styles.profileButton}
+          onPress={onOpenProfile}
+          accessibilityLabel="Profile and settings">
+          <Text style={styles.profileButtonText}>
+            {identity ? initialsFor(identity.userId) : '⚙'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       <Image source={LOGO} style={styles.homeLogo} />
-      <Text style={styles.kicker}>DATALAKE 3.0 FIELD AUTH</Text>
-      <Text style={styles.homeTitle}>Face Auth</Text>
-      <Text style={styles.homeSubtitle}>
-        Choose a local action. Enroll creates the face template on this phone;
-        verify checks against saved templates.
-      </Text>
+
+      {identity ? (
+        <>
+          <Text style={styles.welcomeKicker}>WELCOME BACK</Text>
+          <Text style={styles.homeTitle}>{identity.userId}</Text>
+          <View style={styles.rolePill}>
+            <Text style={styles.rolePillText}>{roleLabel(identity.role)}</Text>
+          </View>
+          <Text style={styles.homeSubtitle}>
+            You're enrolled on this device. Verify works fully offline; sync
+            attendance when you're back online.
+          </Text>
+        </>
+      ) : (
+        <>
+          <Text style={styles.homeTitle}>Face Auth</Text>
+          <Text style={styles.homeSubtitle}>
+            Enroll (needs internet) to register on this device — then verify
+            fully offline in the field.
+          </Text>
+        </>
+      )}
 
       <View style={styles.homeActions}>
         <TouchableOpacity style={styles.primaryButton} onPress={onVerify}>
           <Text style={styles.primaryButtonText}>Verify</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.secondaryButton} onPress={onEnroll}>
-          <Text style={styles.secondaryButtonText}>Enroll</Text>
+          <Text style={styles.secondaryButtonText}>
+            {identity ? 'Enroll another inspector' : 'Enroll'}
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -1514,28 +1629,135 @@ function HomePage({
         </View>
       )}
 
-      {(enrolled > 0 || pending > 0) && (
-        <TouchableOpacity onPress={onReset} style={styles.dangerButton}>
-          <Text style={styles.dangerButtonText}>Reset local demo data</Text>
-        </TouchableOpacity>
-      )}
-
       <Text style={styles.versionTag}>{APP_VERSION}</Text>
     </ScrollView>
   );
 }
 
+function ProfilePanel({
+  visible,
+  identity,
+  voice,
+  lang,
+  pending,
+  online,
+  onToggleVoice,
+  onToggleLang,
+  onReset,
+  onClose,
+}: {
+  visible: boolean;
+  identity: {userId: string; role?: string} | null;
+  voice: boolean;
+  lang: Lang;
+  pending: number;
+  online: boolean;
+  onToggleVoice: () => void;
+  onToggleLang: () => void;
+  onReset: () => void;
+  onClose: () => void;
+}): React.JSX.Element {
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      onRequestClose={onClose}>
+      <View style={styles.sheetBackdrop}>
+        <View style={styles.sheet}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <View style={styles.profileAvatar}>
+              <Text style={styles.profileAvatarText}>
+                {identity ? initialsFor(identity.userId) : 'NH'}
+              </Text>
+            </View>
+            <View style={{flex: 1}}>
+              <Text style={styles.sheetName}>
+                {identity ? identity.userId : 'Not enrolled'}
+              </Text>
+              <Text style={styles.sheetRole}>
+                {identity ? roleLabel(identity.role) : 'Enrol to register'}
+              </Text>
+            </View>
+            <TouchableOpacity style={styles.sheetClose} onPress={onClose}>
+              <Text style={styles.sheetCloseText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.sheetSection}>SETTINGS</Text>
+          <SettingRow
+            label="Connection"
+            value={online ? 'Online' : 'Offline'}
+            active={online}
+          />
+          <SettingRow
+            label="Voice prompts"
+            value={voice ? 'On' : 'Off'}
+            active={voice}
+            onPress={onToggleVoice}
+          />
+          <SettingRow
+            label="Language"
+            value={lang === 'hi' ? 'हिन्दी' : 'English'}
+            active
+            onPress={onToggleLang}
+          />
+          <SettingRow label="Pending records" value={String(pending)} />
+          <SettingRow label="App version" value={APP_VERSION} />
+
+          <Text style={styles.sheetSection}>DEVICE</Text>
+          <TouchableOpacity style={styles.dangerButton} onPress={onReset}>
+            <Text style={styles.dangerButtonText}>
+              Reset device (clear enrolments & records)
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function SettingRow({
+  label,
+  value,
+  active,
+  onPress,
+}: {
+  label: string;
+  value: string;
+  active?: boolean;
+  onPress?: () => void;
+}): React.JSX.Element {
+  return (
+    <TouchableOpacity
+      style={styles.settingRow}
+      onPress={onPress}
+      disabled={!onPress}
+      activeOpacity={onPress ? 0.6 : 1}>
+      <Text style={styles.settingLabel}>{label}</Text>
+      <Text style={[styles.settingValue, active && styles.settingValueActive]}>
+        {value}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
 function EnrollIdPage({
   userId,
+  role,
   verdict,
   onChangeUserId,
+  onChangeRole,
   onGenerate,
   onContinue,
   onBack,
 }: {
   userId: string;
+  role: string;
   verdict: Verdict | null;
   onChangeUserId: (id: string) => void;
+  onChangeRole: (role: string) => void;
   onGenerate: () => void;
   onContinue: () => void;
   onBack: () => void;
@@ -1565,6 +1787,26 @@ function EnrollIdPage({
           autoCapitalize="none"
           style={styles.input}
         />
+        <Text style={[styles.cardTitle, {marginTop: 16}]}>Role</Text>
+        <View style={styles.roleRow}>
+          {ENROLL_ROLES.map(r => {
+            const active = r.id === role;
+            return (
+              <TouchableOpacity
+                key={r.id}
+                style={[styles.roleChip, active && styles.roleChipActive]}
+                onPress={() => onChangeRole(r.id)}>
+                <Text
+                  style={[
+                    styles.roleChipText,
+                    active && styles.roleChipTextActive,
+                  ]}>
+                  {r.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
         <View style={styles.setupButtons}>
           <TouchableOpacity style={styles.secondaryButton} onPress={onGenerate}>
             <Text style={styles.secondaryButtonText}>Generate ID</Text>
@@ -1867,7 +2109,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   secondaryButtonText: {color: '#38e0a5', fontWeight: '900', fontSize: 14},
-  setupButtons: {marginTop: 4},
+  setupButtons: {marginTop: 14},
+  roleRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10},
+  roleChip: {
+    borderColor: '#25323b',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  roleChipActive: {
+    borderColor: '#38e0a5',
+    backgroundColor: 'rgba(56,224,165,0.12)',
+  },
+  roleChipText: {color: '#8b97a5', fontSize: 13, fontWeight: '700'},
+  roleChipTextActive: {color: '#38e0a5'},
   dangerButton: {
     marginTop: 10,
     borderColor: '#ff6b6b',
@@ -1883,6 +2139,105 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 16,
   },
+  homeTopBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 6,
+  },
+  profileButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#25323b',
+    backgroundColor: '#111a21',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileButtonText: {color: '#38e0a5', fontSize: 14, fontWeight: '900'},
+  welcomeKicker: {
+    color: '#38e0a5',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 2,
+    marginTop: 6,
+  },
+  rolePill: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    borderColor: '#25323b',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    backgroundColor: 'rgba(56,224,165,0.1)',
+  },
+  rolePillText: {color: '#38e0a5', fontSize: 12, fontWeight: '800'},
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: '#0d1216',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderTopColor: '#25323b',
+    borderTopWidth: 1,
+    padding: 20,
+    paddingBottom: 34,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#25323b',
+    marginBottom: 16,
+  },
+  sheetHeader: {flexDirection: 'row', alignItems: 'center', gap: 12},
+  profileAvatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(56,224,165,0.14)',
+    borderColor: '#38e0a5',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileAvatarText: {color: '#38e0a5', fontSize: 16, fontWeight: '900'},
+  sheetName: {color: '#dbe4e8', fontSize: 17, fontWeight: '900'},
+  sheetRole: {color: '#8b97a5', fontSize: 13, marginTop: 2},
+  sheetClose: {
+    borderColor: '#25323b',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  sheetCloseText: {color: '#38e0a5', fontWeight: '800', fontSize: 13},
+  sheetSection: {
+    color: '#46535b',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    marginTop: 20,
+    marginBottom: 6,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 13,
+    borderBottomColor: '#1a242c',
+    borderBottomWidth: 1,
+  },
+  settingLabel: {color: '#dbe4e8', fontSize: 15},
+  settingValue: {color: '#8b97a5', fontSize: 14, fontWeight: '700'},
+  settingValueActive: {color: '#38e0a5'},
   verdict: {
     marginTop: 12,
     borderColor: '#ff6b6b',

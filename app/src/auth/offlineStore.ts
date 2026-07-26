@@ -18,6 +18,8 @@ export interface Enrollment {
   embedding: number[];
   createdAt: number;
   samples: number;
+  /** Datalake role chosen at enrollment (for the on-device welcome screen). */
+  role?: string;
 }
 
 export interface RecordLocation {
@@ -80,7 +82,12 @@ export class OfflineAuthStore {
     return readJson<Enrollment[]>(this.storage, ENROLLMENTS_KEY, []);
   }
 
-  saveEnrollment(userId: string, samples: Embedding[], now = Date.now()): void {
+  saveEnrollment(
+    userId: string,
+    samples: Embedding[],
+    now = Date.now(),
+    role?: string,
+  ): void {
     const embedding = averageEmbeddings(samples);
     const next = this.listEnrollments().filter(e => e.userId !== userId);
     next.push({
@@ -88,8 +95,17 @@ export class OfflineAuthStore {
       embedding: Array.from(embedding),
       createdAt: now,
       samples: samples.length,
+      ...(role ? {role} : {}),
     });
     writeJson(this.storage, ENROLLMENTS_KEY, next);
+  }
+
+  /** The most-recently enrolled identity on this device (for the welcome screen). */
+  latestEnrollment(): Enrollment | null {
+    const all = this.listEnrollments();
+    return all.length
+      ? all.reduce((a, b) => (b.createdAt > a.createdAt ? b : a))
+      : null;
   }
 
   verify(probe: Embedding): VerifyOutcome {
