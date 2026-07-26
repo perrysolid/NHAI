@@ -44,7 +44,7 @@ import {
   SYNC,
   THRESHOLDS,
 } from '../config';
-import {evaluateGeofence} from '../location/geofence';
+import {evaluateGeofence, bearingDeg, compass8} from '../location/geofence';
 import {fetchAssignedSites, baseUrlFromSyncUrl} from '../location/provisioning';
 import {createLocationProvider} from '../location/locationProvider';
 import type {GeofenceResult, LocationFix} from '../location/types';
@@ -184,7 +184,7 @@ const ENROLL_ROLES: {id: string; label: string}[] = [
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
 // Bump alongside android versionName so a screenshot reveals the running build.
-const APP_VERSION = 'v2.0 · build 11';
+const APP_VERSION = 'v2.1 · build 12';
 
 /**
  * One downscaled full-frame RGB buffer plus the face box already scaled into its
@@ -259,6 +259,13 @@ export default function CameraScreen(): React.JSX.Element {
   } | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
+  const [geoStatus, setGeoStatus] = useState<{
+    reason: string;
+    siteName?: string;
+    distanceM: number;
+    inside: boolean;
+    compass?: string;
+  } | null>(null);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   const [liveness, setLiveness] = useState<LivenessSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
@@ -375,9 +382,40 @@ export default function CameraScreen(): React.JSX.Element {
           maxAgeMs: GEOFENCE.maxFixAgeMs,
         })
         .then(fix => {
-          if (!cancelled && fix) {
+          if (cancelled) {
+            return;
+          }
+          if (fix) {
             latestFixRef.current = fix;
           }
+          // Live geofence readout — only when a real zone has been provisioned.
+          const provisioned = store.getSites();
+          if (provisioned.length === 0) {
+            setGeoStatus(null);
+            return;
+          }
+          if (!fix) {
+            setGeoStatus({reason: 'no_fix', distanceM: 0, inside: false});
+            return;
+          }
+          const geo = evaluateGeofence(fix, provisioned, {
+            maxAccuracyM: GEOFENCE.maxAccuracyM,
+            rejectMocked: GEOFENCE.rejectMocked,
+          });
+          let compass: string | undefined;
+          if (!geo.insideSite && geo.siteId) {
+            const site = provisioned.find(s => s.id === geo.siteId);
+            if (site && site.shape.kind === 'circle') {
+              compass = compass8(bearingDeg(fix, site.shape.center));
+            }
+          }
+          setGeoStatus({
+            reason: geo.reason,
+            siteName: geo.siteName,
+            distanceM: geo.distanceM,
+            inside: geo.insideSite,
+            compass,
+          });
         })
         .catch(() => undefined);
     };
@@ -394,7 +432,7 @@ export default function CameraScreen(): React.JSX.Element {
         clearInterval(timer);
       }
     };
-  }, [page, locationProvider]);
+  }, [page, locationProvider, store]);
 
   useEffect(() => {
     if (page === 'camera' && voice && gate.status) {
@@ -1445,6 +1483,7 @@ export default function CameraScreen(): React.JSX.Element {
           resultTone={verifyResultTone ?? undefined}
         />
         {cameraTop}
+        {geoStatus && <GeoBadge status={geoStatus} />}
         <View style={styles.cameraActionBar}>
           {verifyResultTone === 'success' ? (
             <View style={styles.resultActionsRow}>
@@ -1841,6 +1880,50 @@ function Centered({children}: {children: React.ReactNode}): React.JSX.Element {
   return <View style={[styles.container, styles.centered]}>{children}</View>;
 }
 
+/** Live "distance to assigned site" readout on the verify camera screen. */
+function GeoBadge({
+  status,
+}: {
+  status: {
+    reason: string;
+    siteName?: string;
+    distanceM: number;
+    inside: boolean;
+    compass?: string;
+  };
+}): React.JSX.Element {
+  let color = '#8b97a5';
+  let text = 'Locating…';
+  switch (status.reason) {
+    case 'inside':
+      color = '#38e0a5';
+      text = `At ${status.siteName ?? 'site'}`;
+      break;
+    case 'outside':
+      color = '#f2b347';
+      text = `${status.distanceM} m outside ${status.siteName ?? 'site'}${
+        status.compass ? ` · move ${status.compass}` : ''
+      }`;
+      break;
+    case 'mocked':
+      color = '#ff6b6b';
+      text = 'Mock / fake GPS detected';
+      break;
+    case 'poor_accuracy':
+      text = 'Improving GPS accuracy…';
+      break;
+    case 'no_fix':
+      text = 'Locating…';
+      break;
+  }
+  return (
+    <View style={styles.geoBadge}>
+      <View style={[styles.geoDot, {backgroundColor: color}]} />
+      <Text style={[styles.geoBadgeText, {color}]}>{text}</Text>
+    </View>
+  );
+}
+
 function StatusPill({
   label,
   tone,
@@ -1946,6 +2029,22 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
+  geoBadge: {
+    position: 'absolute',
+    top: 56,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(7,9,11,0.82)',
+    borderColor: '#25323b',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    paddingVertical: 7,
+  },
+  geoDot: {width: 8, height: 8, borderRadius: 4},
+  geoBadgeText: {fontSize: 12.5, fontWeight: '800'},
   cameraActionBar: {
     position: 'absolute',
     left: 16,

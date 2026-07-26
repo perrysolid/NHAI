@@ -1,4 +1,6 @@
 import {
+  bearingDeg,
+  compass8,
   distanceToSite,
   evaluateGeofence,
   haversineMeters,
@@ -52,6 +54,22 @@ describe('pointInPolygon', () => {
   });
   it('rejects an exterior point', () => {
     expect(pointInPolygon({lat: 2, lon: 2}, square)).toBe(false);
+  });
+});
+
+describe('bearing + compass', () => {
+  it('points north when the target is due north', () => {
+    expect(bearingDeg({lat: 0, lon: 0}, {lat: 1, lon: 0})).toBeCloseTo(0, 1);
+    expect(compass8(bearingDeg({lat: 0, lon: 0}, {lat: 1, lon: 0}))).toBe('N');
+  });
+  it('points east when the target is due east', () => {
+    expect(bearingDeg({lat: 0, lon: 0}, {lat: 0, lon: 1})).toBeCloseTo(90, 0);
+    expect(compass8(90)).toBe('E');
+  });
+  it('maps degrees to the nearest 8-point label', () => {
+    expect(compass8(45)).toBe('NE');
+    expect(compass8(200)).toBe('S');
+    expect(compass8(315)).toBe('NW');
   });
 });
 
