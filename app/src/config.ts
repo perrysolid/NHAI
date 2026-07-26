@@ -129,11 +129,11 @@ export const THRESHOLDS = {
   /** Minimum range the eye-open signal must span during a verify attempt — a
    *  real blink swings ~0.8; a held photo stays flat. Defeats static spoofs. */
   livenessMotionRange: 0.2,
-  /** How many random motion actions the verify challenge requires, out of
-   *  blink/smile/turn. 3 asks for all of them (in a random order each
-   *  attempt) — matches the poses captured at enrollment (see ENROLL_STEPS in
-   *  screens/CameraScreen.tsx) for a full device-Face-ID-style challenge. */
-  livenessActionCount: 3,
+  /** How many unique random actions the verify challenge requires, out of the
+   *  pool in face/livenessActions.ts (blink/smile/turnLeft/turnRight). 2 asks
+   *  for a random pair each attempt — enrollment still requires ALL of them,
+   *  once each, in a fixed order (see LIVENESS_ACTIONS). */
+  livenessActionCount: 2,
   /** Active-challenge window — shared across all `livenessActionCount`
    *  actions in one attempt, so it scales with the count: generous enough
    *  that a real user isn't rushed even asking for all 3. */

@@ -59,7 +59,6 @@ import {
   pick,
   GATE_TEXT,
   LIVENESS_TEXT,
-  ENROLL_STEP_TEXT,
   getLang,
   setLang,
   type Lang,
@@ -71,6 +70,14 @@ import {
   type LivenessSnapshot,
   type LivenessStatus,
 } from '../face/liveness';
+import {
+  LIVENESS_ACTIONS,
+  ACTION_LABEL,
+  freshActionState,
+  isActionSatisfied,
+  type ActionState,
+  type LivenessActionKind,
+} from '../face/livenessActions';
 import {TfliteFaceEngine, preprocessRgb, type FaceEngine} from '../face/engine';
 import {computeComposite, confidenceFromCosine} from '../face/scoring';
 import {syncPending} from '../sync/syncClient';
@@ -83,94 +90,19 @@ type Mode = 'enroll' | 'verify';
 type EngineState = 'loading' | 'ready' | 'error';
 
 /**
- * Guided, FIXED-order enrollment: neutral, smile, blink, turn. One embedding
- * sample is captured per pose once its gesture is confirmed, so the stored
- * template covers a spread of expressions/angles instead of three
- * near-identical frames of the same neutral pose grabbed in quick succession.
- * Fixed order (unlike the verify challenge, which randomizes) because this is
- * teaching the system what the person looks like, not testing for liveness
- * under adversarial conditions.
+ * Guided, FIXED-order enrollment over the shared liveness action pool
+ * (face/livenessActions.ts: blink, smile, turnLeft, turnRight). One embedding
+ * sample is captured per action once its gesture is confirmed, so the stored
+ * template covers a spread of expressions/angles instead of several
+ * near-identical neutral frames grabbed in quick succession. Fixed order
+ * (unlike the verify challenge, which randomizes) because this is teaching
+ * the system what the person looks like, not testing for liveness under
+ * adversarial conditions. Enrollment and verify share the SAME detection
+ * logic (isActionSatisfied) — nothing here is duplicated.
  */
-type EnrollStepKind = 'neutral' | 'smile' | 'blink' | 'turn';
-const ENROLL_STEPS: EnrollStepKind[] = ['neutral', 'smile', 'blink', 'turn'];
-
-interface EnrollGestureState {
-  blinkPhase: 'await_open' | 'await_close' | 'await_reopen';
-  baselineYaw: number | null;
-  minEye: number;
-  maxEye: number;
+function enrollStepGuidance(step: LivenessActionKind | 'done'): string {
+  return pick(LIVENESS_TEXT[step]);
 }
-
-function freshEnrollGestureState(): EnrollGestureState {
-  return {blinkPhase: 'await_open', baselineYaw: null, minEye: 1, maxEye: 0};
-}
-
-/**
- * True the instant the given step's pose is confirmed on this frame. Mutates
- * `state` to track blink/turn progress across calls for the SAME step — the
- * caller must reset `state` (freshEnrollGestureState()) whenever it advances
- * to a new step, otherwise leftover baseline/phase from the previous step
- * would corrupt detection of the next one.
- */
-function isEnrollStepReady(
-  step: EnrollStepKind,
-  face: Face | null,
-  gateReady: boolean,
-  state: EnrollGestureState,
-): boolean {
-  switch (step) {
-    case 'neutral':
-      return gateReady;
-    case 'smile':
-      return !!face && (face.smilingProbability ?? 0) >= THRESHOLDS.smileProb;
-    case 'blink': {
-      if (!face) {
-        return false;
-      }
-      const eye = Math.min(
-        face.leftEyeOpenProbability ?? 1,
-        face.rightEyeOpenProbability ?? 1,
-      );
-      state.minEye = Math.min(state.minEye, eye);
-      state.maxEye = Math.max(state.maxEye, eye);
-      const open = eye >= THRESHOLDS.blinkOpenProb;
-      const closed = eye <= THRESHOLDS.blinkClosedProb;
-      if (state.blinkPhase === 'await_open' && open) {
-        state.blinkPhase = 'await_close';
-      } else if (state.blinkPhase === 'await_close' && closed) {
-        state.blinkPhase = 'await_reopen';
-      } else if (state.blinkPhase === 'await_reopen' && open) {
-        // Guard against a flat/near-static reading sneaking through the
-        // open/closed cutoffs without a real swing.
-        return state.maxEye - state.minEye >= THRESHOLDS.livenessMotionRange;
-      }
-      return false;
-    }
-    case 'turn': {
-      if (!face) {
-        return false;
-      }
-      if (state.baselineYaw === null) {
-        state.baselineYaw = face.yawAngle;
-      }
-      return (
-        Math.abs(face.yawAngle - state.baselineYaw) >=
-        THRESHOLDS.headTurnDeltaDeg
-      );
-    }
-  }
-}
-
-function enrollStepGuidance(step: EnrollStepKind | 'done'): string {
-  return pick(ENROLL_STEP_TEXT[step]);
-}
-
-const ENROLL_STEP_LABEL: Record<EnrollStepKind, string> = {
-  neutral: 'Neutral face',
-  smile: 'Smile',
-  blink: 'Blink',
-  turn: 'Turn head',
-};
 
 /** Datalake field roles, chosen at enrollment and synced to the backend. */
 const ENROLL_ROLES: {id: string; label: string}[] = [
@@ -248,7 +180,7 @@ export default function CameraScreen(): React.JSX.Element {
   const [role, setRole] = useState('authority-engineer');
   const [engineState, setEngineState] = useState<EngineState>('loading');
   const [engineError, setEngineError] = useState('');
-  // Which guided step (ENROLL_STEPS index) enrollment is currently on/has
+  // Which guided step (LIVENESS_ACTIONS index) enrollment is currently on/has
   // reached — drives both the capture decision and the progress UI.
   const [enrollStepIndex, setEnrollStepIndex] = useState(0);
   const [enrolled, setEnrolled] = useState(0);
@@ -293,11 +225,9 @@ export default function CameraScreen(): React.JSX.Element {
   const latestMediumRef = useRef<MediumFrame | null>(null);
   const latestRgbLenRef = useRef(0);
   const enrollSamplesRef = useRef<Float32Array[]>([]);
-  // Blink-phase / turn-baseline tracking for whichever enroll step is active;
-  // reset (freshEnrollGestureState()) every time enrollStepIndex advances.
-  const enrollGestureRef = useRef<EnrollGestureState>(
-    freshEnrollGestureState(),
-  );
+  // Blink-phase / turn-baseline tracking for whichever enroll action is
+  // active; reset (freshActionState()) every time enrollStepIndex advances.
+  const enrollGestureRef = useRef<ActionState>(freshActionState());
   // Always holds the latest onCaptureEnrollStep closure so onSignals (a
   // stable, empty-deps callback) can invoke the current version without being
   // recreated itself — same mirroring pattern as the other *Ref values below.
@@ -523,9 +453,9 @@ export default function CameraScreen(): React.JSX.Element {
           latestFaceRef.current = faces.length === 1 ? faces[0] : null;
           latestBrightnessRef.current = brightness;
           latestRgbLenRef.current = rgbLen;
-          // Trigger enroll capture HERE, the instant a step's pose is
+          // Trigger enroll capture HERE, the instant an action's pose is
           // confirmed, instead of polling a flag from a separate interval.
-          // isEnrollStepReady's blink/turn checks are transient — they can
+          // isActionSatisfied's blink/turn checks are transient — they can
           // read true on one frame and false on the next as the tracked value
           // oscillates around the threshold — so a slower poll can easily
           // always sample the false frames and never the true one. Reacting
@@ -535,13 +465,13 @@ export default function CameraScreen(): React.JSX.Element {
             modeRef.current === 'enroll' &&
             engineStateRef.current === 'ready' &&
             !busyRef.current &&
-            enrollStepIndexRef.current < ENROLL_STEPS.length
+            latestFaceRef.current &&
+            enrollStepIndexRef.current < LIVENESS_ACTIONS.length
           ) {
-            const step = ENROLL_STEPS[enrollStepIndexRef.current];
-            const ready = isEnrollStepReady(
+            const step = LIVENESS_ACTIONS[enrollStepIndexRef.current];
+            const ready = isActionSatisfied(
               step,
               latestFaceRef.current,
-              gateResult.ready,
               enrollGestureRef.current,
             );
             if (ready) {
@@ -691,7 +621,7 @@ export default function CameraScreen(): React.JSX.Element {
     setEnrollStepIndex(0);
     setEnrollComplete(false);
     enrollSamplesRef.current = [];
-    enrollGestureRef.current = freshEnrollGestureState();
+    enrollGestureRef.current = freshActionState();
   }, [isOnline]);
 
   const openEnrollCamera = useCallback(() => {
@@ -805,22 +735,22 @@ export default function CameraScreen(): React.JSX.Element {
 
   // Captures the CURRENT enroll step's sample, then advances to the next pose
   // (or finishes enrollment on the last one). Called only once the step's
-  // gesture has actually been confirmed by isEnrollStepReady — see the
-  // autonomous-capture effect below.
+  // gesture has actually been confirmed by isActionSatisfied — see the
+  // per-frame trigger in onSignals above.
   const onCaptureEnrollStep = useCallback(async () => {
     const id = userId.trim();
     if (!id) {
       setVerdict({ok: false, title: 'Enter inspector ID', detail: 'Required'});
       return;
     }
-    const step = ENROLL_STEPS[enrollStepIndex];
+    const step = LIVENESS_ACTIONS[enrollStepIndex];
     setBusy(true);
     try {
       const embedding = await captureEmbedding();
       enrollSamplesRef.current.push(embedding);
       const nextIndex = enrollStepIndex + 1;
-      enrollGestureRef.current = freshEnrollGestureState();
-      if (nextIndex >= ENROLL_STEPS.length) {
+      enrollGestureRef.current = freshActionState();
+      if (nextIndex >= LIVENESS_ACTIONS.length) {
         const samples = [...enrollSamplesRef.current];
         store.saveEnrollment(id, samples, undefined, role);
         enrollSamplesRef.current = [];
@@ -862,8 +792,8 @@ export default function CameraScreen(): React.JSX.Element {
         setEnrollStepIndex(nextIndex);
         setVerdict({
           ok: true,
-          title: `Step ${nextIndex}/${ENROLL_STEPS.length} captured`,
-          detail: `Next: ${enrollStepGuidance(ENROLL_STEPS[nextIndex])}`,
+          title: `Step ${nextIndex}/${LIVENESS_ACTIONS.length} captured`,
+          detail: `Next: ${enrollStepGuidance(LIVENESS_ACTIONS[nextIndex])}`,
         });
       }
     } catch (e) {
@@ -887,7 +817,7 @@ export default function CameraScreen(): React.JSX.Element {
 
   // Autonomous enrollment capture is triggered directly from onSignals (every
   // processed frame) the instant a step's pose is confirmed — see the
-  // isEnrollStepReady call there. This just keeps the ref onSignals calls
+  // isActionSatisfied call there. This just keeps the ref onSignals calls
   // pointing at the current closure.
   useEffect(() => {
     onCaptureEnrollStepRef.current = onCaptureEnrollStep;
@@ -1125,7 +1055,7 @@ export default function CameraScreen(): React.JSX.Element {
       setLiveness(snap);
       if (voice) {
         if (snap.status === 'running') {
-          speak(LIVENESS_TEXT[snap.challenges[snap.index]]);
+          speak(LIVENESS_TEXT[snap.actions[snap.index]]);
         } else if (snap.status === 'failed') {
           speak(LIVENESS_TEXT.failed);
         }
@@ -1369,7 +1299,7 @@ export default function CameraScreen(): React.JSX.Element {
   // "chaotic" jump the enroll flow must not do anymore.
   if (mode === 'enroll') {
     const enrollBusy = busy || engineState !== 'ready' || enrollComplete;
-    const currentStep = enrollComplete ? null : ENROLL_STEPS[enrollStepIndex];
+    const currentStep = enrollComplete ? null : LIVENESS_ACTIONS[enrollStepIndex];
     const stepPrompt = enrollStepGuidance(currentStep ?? 'done');
     const overlayText = enrollComplete
       ? stepPrompt
@@ -1397,7 +1327,7 @@ export default function CameraScreen(): React.JSX.Element {
               <Text style={styles.cameraActionText}>
                 {enrollComplete
                   ? 'Saved — returning home...'
-                  : `Capture: ${ENROLL_STEP_LABEL[currentStep!]}`}
+                  : `Capture: ${ACTION_LABEL[currentStep!]}`}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1422,13 +1352,13 @@ export default function CameraScreen(): React.JSX.Element {
             <Text style={styles.idLine}>{userId.trim()}</Text>
             <Text style={styles.progressText}>
               {enrollComplete
-                ? `All ${ENROLL_STEPS.length} poses captured — saved`
+                ? `All ${LIVENESS_ACTIONS.length} poses captured — saved`
                 : `Step ${enrollStepIndex + 1}/${
-                    ENROLL_STEPS.length
+                    LIVENESS_ACTIONS.length
                   } — follow each prompt, captures automatically`}
             </Text>
             <View style={styles.stepList}>
-              {ENROLL_STEPS.map((step, i) => {
+              {LIVENESS_ACTIONS.map((step, i) => {
                 const isDone = enrollComplete || i < enrollStepIndex;
                 const isCurrent = !enrollComplete && i === enrollStepIndex;
                 return (
@@ -1452,7 +1382,7 @@ export default function CameraScreen(): React.JSX.Element {
                         styles.stepLabel,
                         isCurrent && styles.stepLabelCurrent,
                       ]}>
-                      {ENROLL_STEP_LABEL[step]}
+                      {ACTION_LABEL[step]}
                     </Text>
                   </View>
                 );

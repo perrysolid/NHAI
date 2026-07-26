@@ -35,21 +35,15 @@ export const GATE_TEXT: Record<string, Pair> = {
   too_bright: {hi: 'चमक कम करें', en: 'Reduce glare'},
 };
 
+/** Liveness action prompts — shared between enrollment (walks through every
+ *  action once) and verify (asks for a random subset), so the wording an
+ *  operator learns at enroll time is exactly what verify asks for later. */
 export const LIVENESS_TEXT: Record<string, Pair> = {
   blink: {hi: 'पलक झपकाएँ', en: 'Blink your eyes'},
   smile: {hi: 'मुस्कुराएँ', en: 'Smile'},
-  turn: {hi: 'सिर बाएँ-दाएँ घुमाएँ', en: 'Turn your head left or right'},
+  turnLeft: {hi: 'सिर बाईं ओर घुमाएँ', en: 'Turn your head left'},
+  turnRight: {hi: 'सिर दाईं ओर घुमाएँ', en: 'Turn your head right'},
   passed: {hi: 'सत्यापित', en: 'Liveness confirmed'},
   failed: {hi: 'विफल, पुनः प्रयास करें', en: 'Liveness failed, retry'},
-};
-
-/** Guided-enrollment step prompts. Shares wording with LIVENESS_TEXT for
- *  smile/blink/turn so the phrasing at enroll time matches what's asked again
- *  at verify time. */
-export const ENROLL_STEP_TEXT: Record<string, Pair> = {
-  neutral: {hi: 'सीधा देखें, सामान्य भाव', en: 'Look straight, neutral face'},
-  smile: LIVENESS_TEXT.smile,
-  blink: LIVENESS_TEXT.blink,
-  turn: LIVENESS_TEXT.turn,
   done: {hi: 'सभी चरण पूरे हुए', en: 'All steps complete'},
 };
