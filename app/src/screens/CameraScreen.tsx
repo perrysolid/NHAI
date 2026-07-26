@@ -184,7 +184,7 @@ const ENROLL_ROLES: {id: string; label: string}[] = [
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
 // Bump alongside android versionName so a screenshot reveals the running build.
-const APP_VERSION = 'v1.9 · build 10';
+const APP_VERSION = 'v2.0 · build 11';
 
 /**
  * One downscaled full-frame RGB buffer plus the face box already scaled into its
@@ -910,10 +910,20 @@ export default function CameraScreen(): React.JSX.Element {
       });
       const latencyMs = Date.now() - t0;
 
-      // On-device geofence: is the worker physically at the assigned site? This
-      // reads the cached GPS fix (no wait) and never touches the identity
-      // decision — it's an independent presence signal on the record.
-      const fix = latestFixRef.current;
+      // On-device geofence: is the worker physically at the assigned site? Uses
+      // the cached GPS fix, but if none is cached yet (cold GPS / permission just
+      // granted), fetch one now so the verify record always carries coordinates.
+      // Never touches the identity decision — an independent presence signal.
+      let fix = latestFixRef.current;
+      if (!fix) {
+        fix = await locationProvider.getFix({
+          timeoutMs: GEOFENCE.fixTimeoutMs,
+          maxAgeMs: GEOFENCE.maxFixAgeMs,
+        });
+        if (fix) {
+          latestFixRef.current = fix;
+        }
+      }
       // Prefer admin-provisioned sites cached on the device; fall back to the
       // static config.SITES only when nothing has been provisioned yet.
       const cachedSites = store.getSites();
@@ -1003,7 +1013,7 @@ export default function CameraScreen(): React.JSX.Element {
         latencyMs,
       });
     },
-    [refreshCounts, showVerifyResult, store, userId],
+    [locationProvider, refreshCounts, showVerifyResult, store, userId],
   );
 
   // Autonomous verification — hands-free to START, but liveness is mandatory.
