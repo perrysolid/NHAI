@@ -226,6 +226,13 @@ export const SCORING = {
 // ────────────────────────────────────────────────────────────────────────────
 export const CAMERA = {
   targetFps: 8, // frame-processor throttle (runAtTargetFps)
+  /** Degrees to rotate the recognition/liveness crop so the face is UPRIGHT. The
+   *  front-camera sensor buffer is landscape while the phone is held portrait, so
+   *  the face lands rotated 90° in the medium buffer; +90° here re-uprights it.
+   *  Verified on-device by dumping the crop (debug_imgs). Recognition models are
+   *  trained on upright faces — a sideways crop was THE cause of "different people
+   *  match / same person's score swings 0.77–0.95". */
+  recognitionRotationDeg: 90,
   /** The worklet downscales each frame to this longest-edge (px), preserving the
    *  full field of view (no center-crop), and hands that one RGB buffer to JS.
    *  JS then crops the aligned face from it (see camera/faceCrop.ts). Big enough

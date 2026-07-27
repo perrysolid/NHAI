@@ -54,7 +54,13 @@ import type {RecordLocation} from '../auth/offlineStore';
 import {evaluateFace} from '../camera/qualityGates';
 import {meanLuma} from '../camera/frameUtils';
 import {cropFace, scaleBox} from '../camera/faceCrop';
-import type {Face, FaceBounds, GateResult} from '../camera/types';
+import {alignFace} from '../camera/faceAlign';
+import type {
+  Face,
+  FaceBounds,
+  FaceLandmarks,
+  GateResult,
+} from '../camera/types';
 import {OfflineAuthStore} from '../auth/offlineStore';
 import {createEncryptedAuthStore} from '../auth/mmkvStore';
 import {
@@ -130,6 +136,9 @@ interface MediumFrame {
   width: number;
   height: number;
   box: FaceBounds;
+  /** 5 ArcFace landmarks in THIS buffer's pixel coords (present when the detector
+   *  returned them). Drives similarity alignment of the recognition crop. */
+  landmarks?: FaceLandmarks;
 }
 
 interface Verdict {
@@ -539,7 +548,9 @@ export default function CameraScreen(): React.JSX.Element {
   const faceOptions = useMemo<FaceDetectionOptions>(
     () => ({
       performanceMode: 'fast',
-      landmarkMode: 'none',
+      // 'all' surfaces the 5 landmarks (eyes/nose/mouth) used for ArcFace
+      // similarity alignment — the ideal, tight, upright crop for the model.
+      landmarkMode: 'all',
       contourMode: 'none',
       classificationMode: 'all',
       trackingEnabled: true,
@@ -556,6 +567,7 @@ export default function CameraScreen(): React.JSX.Element {
         (
           faces: Face[],
           frameWidth: number,
+          frameHeight: number,
           brightness: number,
           rgbLen: number,
           mediumRgb?: number[],
@@ -607,13 +619,38 @@ export default function CameraScreen(): React.JSX.Element {
             frameWidth > 0
           ) {
             // The medium buffer is a uniform downscale of the frame, so the same
-            // scale maps the face box (frame coords) into buffer coords.
+            // scale maps the face box AND the landmarks (frame coords) into
+            // buffer coords.
             const scale = mediumWidth / frameWidth;
+            // ML Kit reports landmarks in the 90°-rotated PORTRAIT display space
+            // (x∈[0,frameH], y∈[0,frameW]), while the medium buffer is the
+            // LANDSCAPE sensor frame. Map display->buffer (front-camera):
+            //   bx = (frameW - my) * (medW/frameW),  by = mx * (medH/frameH)
+            // Validated on-device by drawing the mapped points back onto the scene
+            // (they land on eyes/nose/mouth) and rendering the aligned crop (tight,
+            // upright, centred). The other 90° variant put nose/mouth on the hair.
+            const lmSx = mediumWidth / frameWidth;
+            const lmSy = mediumHeight / frameHeight;
+            const mapLm = (p: {x: number; y: number}) => ({
+              x: (frameWidth - p.y) * lmSx,
+              y: p.x * lmSy,
+            });
+            const lm = faces[0].landmarks;
+            const landmarks: FaceLandmarks | undefined = lm
+              ? {
+                  leftEye: mapLm(lm.LEFT_EYE),
+                  rightEye: mapLm(lm.RIGHT_EYE),
+                  noseBase: mapLm(lm.NOSE_BASE),
+                  mouthLeft: mapLm(lm.MOUTH_LEFT),
+                  mouthRight: mapLm(lm.MOUTH_RIGHT),
+                }
+              : undefined;
             latestMediumRef.current = {
               rgb: new Uint8Array(mediumRgb),
               width: mediumWidth,
               height: mediumHeight,
               box: scaleBox(faces[0].bounds, scale),
+              ...(landmarks ? {landmarks} : {}),
             };
           } else if (faces.length !== 1) {
             latestMediumRef.current = null;
@@ -701,6 +738,7 @@ export default function CameraScreen(): React.JSX.Element {
         onSignals(
           faces,
           frame.width,
+          frame.height,
           brightness,
           rgbLen,
           mediumRgb,
@@ -821,6 +859,48 @@ export default function CameraScreen(): React.JSX.Element {
     [],
   );
 
+  // The BEST crop for the recognition model: a 5-point ArcFace similarity
+  // alignment when landmarks are present (tight, upright, eyes/nose/mouth pinned
+  // to canonical positions — the transform also fixes rotation & scale), else a
+  // rotation-corrected box crop as a fallback. Enroll and verify BOTH go through
+  // here so templates and probes are prepared identically.
+  const buildBestCrop = useCallback(
+    (
+      medium: MediumFrame,
+      spec: {inputSize: number; cropExpansion: number},
+    ): {crop: Uint8Array; method: 'aligned' | 'boxRot'} => {
+      // BEST: 5-point ArcFace similarity alignment (tight + upright + eyes/nose/
+      // mouth pinned to canonical positions). The landmark->buffer mapping is now
+      // validated on-device (~2px residual). Falls back to the rotation-corrected
+      // box crop only if the detector didn't return landmarks this frame.
+      if (medium.landmarks) {
+        return {
+          crop: alignFace({
+            rgb: medium.rgb,
+            width: medium.width,
+            height: medium.height,
+            landmarks: medium.landmarks,
+            targetSize: spec.inputSize,
+          }),
+          method: 'aligned',
+        };
+      }
+      return {
+        crop: cropFace({
+          rgb: medium.rgb,
+          width: medium.width,
+          height: medium.height,
+          box: medium.box,
+          expansion: spec.cropExpansion,
+          targetSize: spec.inputSize,
+          rotationDeg: CAMERA.recognitionRotationDeg,
+        }),
+        method: 'boxRot',
+      };
+    },
+    [],
+  );
+
   const captureEmbedding = useCallback(async (): Promise<Float32Array> => {
     const engine = engineRef.current;
     const medium = latestMediumRef.current;
@@ -840,16 +920,9 @@ export default function CameraScreen(): React.JSX.Element {
       );
     }
     const spec = RECOGNITION_MODELS[ACTIVE_RECOGNITION];
-    const crop = cropFace({
-      rgb: medium.rgb,
-      width: medium.width,
-      height: medium.height,
-      box: medium.box,
-      expansion: spec.cropExpansion,
-      targetSize: spec.inputSize,
-    });
+    const {crop} = buildBestCrop(medium, spec);
     return engine.embedFace(preprocessRgb(crop, spec));
-  }, [engineState]);
+  }, [engineState, buildBestCrop]);
 
   // Captures the CURRENT enroll step's sample, then advances to the next pose
   // (or finishes enrollment on the last one). Called only once the step's
@@ -982,14 +1055,9 @@ export default function CameraScreen(): React.JSX.Element {
       }
       const t0 = Date.now();
       const recognitionSpec = RECOGNITION_MODELS[ACTIVE_RECOGNITION];
-      const recognitionCrop = cropFace({
-        rgb: medium.rgb,
-        width: medium.width,
-        height: medium.height,
-        box: medium.box,
-        expansion: recognitionSpec.cropExpansion,
-        targetSize: recognitionSpec.inputSize,
-      });
+
+      const {crop: recognitionCrop} = buildBestCrop(medium, recognitionSpec);
+
       const livenessCrop = cropFace({
         rgb: medium.rgb,
         width: medium.width,
@@ -997,11 +1065,13 @@ export default function CameraScreen(): React.JSX.Element {
         box: medium.box,
         expansion: LIVENESS_MODEL.bboxExpansion,
         targetSize: LIVENESS_MODEL.inputSize,
+        rotationDeg: CAMERA.recognitionRotationDeg,
       });
       const [probe, passiveScore] = await Promise.all([
         engine.embedFace(preprocessRgb(recognitionCrop, recognitionSpec)),
         engine.scoreLive(preprocessRgb(livenessCrop, LIVENESS_MODEL)),
       ]);
+
       const verify = store.verify(probe);
       const dual = evaluateDualLiveness({passiveScore, activeStatus});
       // Screen/print-replay defence: a confidently-low passive score means the
@@ -1176,7 +1246,14 @@ export default function CameraScreen(): React.JSX.Element {
         latencyMs,
       });
     },
-    [locationProvider, refreshCounts, showVerifyResult, store, userId],
+    [
+      buildBestCrop,
+      locationProvider,
+      refreshCounts,
+      showVerifyResult,
+      store,
+      userId,
+    ],
   );
 
   // Autonomous verification — hands-free to START, but liveness is mandatory.

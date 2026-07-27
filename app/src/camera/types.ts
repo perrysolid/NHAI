@@ -12,6 +12,30 @@ export interface FaceBounds {
   height: number;
 }
 
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/** Raw ML Kit landmark subset — the UPPER_SNAKE keys the detector emits when
+ *  landmarkMode: 'all'. Coordinates are in frame pixels. */
+export interface RawLandmarks {
+  LEFT_EYE: Point;
+  RIGHT_EYE: Point;
+  NOSE_BASE: Point;
+  MOUTH_LEFT: Point;
+  MOUTH_RIGHT: Point;
+}
+
+/** The 5 ArcFace landmarks in semantic form, used to similarity-align the crop. */
+export interface FaceLandmarks {
+  leftEye: Point;
+  rightEye: Point;
+  noseBase: Point;
+  mouthLeft: Point;
+  mouthRight: Point;
+}
+
 export interface Face {
   bounds: FaceBounds;
   /** head rotation about vertical axis (left/right). */
@@ -24,6 +48,8 @@ export interface Face {
   smilingProbability?: number;
   leftEyeOpenProbability?: number;
   rightEyeOpenProbability?: number;
+  /** Present only when the detector runs with landmarkMode: 'all'. */
+  landmarks?: RawLandmarks;
   /** stable id when trackingEnabled is on. */
   trackingId?: number;
 }
