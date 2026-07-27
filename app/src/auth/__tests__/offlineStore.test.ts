@@ -1,13 +1,16 @@
 import {OfflineAuthStore, createMemoryStorage} from '../offlineStore';
+import {RECOGNITION_MODELS, ACTIVE_RECOGNITION} from '../../config';
 
 describe('OfflineAuthStore', () => {
   it('enrolls, verifies, queues, and purges records', () => {
     const store = new OfflineAuthStore(createMemoryStorage());
-    const sample = new Float32Array([1, 0, 0]);
+    const expectedLen = RECOGNITION_MODELS[ACTIVE_RECOGNITION].embeddingLength;
+    const sample = new Float32Array(expectedLen);
+    sample[0] = 1;
 
     store.saveEnrollment('inspector_01', [sample, sample], 100);
 
-    const ok = store.verify(new Float32Array([1, 0, 0]));
+    const ok = store.verify(sample);
     expect(ok.ok).toBe(true);
     expect(ok.userId).toBe('inspector_01');
 

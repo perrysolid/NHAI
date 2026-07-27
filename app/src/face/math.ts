@@ -28,7 +28,7 @@ export function averageEmbeddings(samples: ArrayLike<number>[]): Embedding {
   const out = new Float32Array(length);
   for (const sample of samples) {
     if (sample.length !== length) {
-      throw new Error('embedding lengths must match');
+      throw new Error(`embedding lengths must match (got ${sample.length} vs ${length})`);
     }
     for (let i = 0; i < length; i++) {
       out[i] += sample[i];
@@ -45,7 +45,9 @@ export function cosineSimilarity(
   b: ArrayLike<number>,
 ): number {
   if (a.length !== b.length) {
-    throw new Error('embedding lengths must match');
+    throw new Error(
+      `Model upgrade detected (stored template has ${b.length} dimensions vs active EdgeFace-S model ${a.length}). Please re-enroll your face on the Enroll tab.`,
+    );
   }
   let dot = 0;
   let an = 0;

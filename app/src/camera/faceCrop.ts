@@ -29,6 +29,11 @@ export interface CropRequest {
   expansion: number;
   /** Output is targetSize x targetSize x 3, tightly packed RGB. */
   targetSize: number;
+  /** Rotate the sampling grid about the box centre by this many degrees so the
+   *  output crop is upright. On this device the sensor buffer is landscape while
+   *  the phone is portrait, so the face is rotated 90°; a quarter-turn here makes
+   *  the crop upright for the recognition model. Default 0 = no rotation. */
+  rotationDeg?: number;
 }
 
 /**
@@ -50,7 +55,7 @@ export function scaleBox(box: FaceBounds, scale: number): FaceBounds {
  * face near the frame edge still yields a full crop instead of failing.
  */
 export function cropFace(req: CropRequest): Uint8Array {
-  const {rgb, width, height, box, expansion, targetSize} = req;
+  const {rgb, width, height, box, expansion, targetSize, rotationDeg = 0} = req;
   if (width <= 0 || height <= 0) {
     throw new Error('cropFace: invalid buffer dimensions');
   }
@@ -63,25 +68,32 @@ export function cropFace(req: CropRequest): Uint8Array {
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
   const side = Math.max(box.width, box.height) * expansion;
-  const x0 = cx - side / 2;
-  const y0 = cy - side / 2;
+
+  // Rotate the sampling grid about the box centre so the output is upright.
+  // For output pixel (u,v) centred on 0, sample the source at
+  // (cx + u·cosθ − v·sinθ, cy + u·sinθ + v·cosθ). θ=0 reduces to the plain crop.
+  const theta = (rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(theta);
+  const sin = Math.sin(theta);
 
   const out = new Uint8Array(targetSize * targetSize * 3);
   const maxX = width - 1;
   const maxY = height - 1;
 
   for (let oy = 0; oy < targetSize; oy++) {
-    const sy = y0 + ((oy + 0.5) / targetSize) * side;
-    const cyF = clamp(sy, 0, maxY);
-    const y1 = Math.floor(cyF);
-    const y2 = Math.min(y1 + 1, maxY);
-    const fy = cyF - y1;
+    const v = ((oy + 0.5) / targetSize - 0.5) * side;
     for (let ox = 0; ox < targetSize; ox++) {
-      const sx = x0 + ((ox + 0.5) / targetSize) * side;
+      const u = ((ox + 0.5) / targetSize - 0.5) * side;
+      const sx = cx + u * cos - v * sin;
+      const sy = cy + u * sin + v * cos;
       const cxF = clamp(sx, 0, maxX);
+      const cyF = clamp(sy, 0, maxY);
       const x1 = Math.floor(cxF);
       const x2 = Math.min(x1 + 1, maxX);
       const fx = cxF - x1;
+      const y1 = Math.floor(cyF);
+      const y2 = Math.min(y1 + 1, maxY);
+      const fy = cyF - y1;
 
       const oBase = (oy * targetSize + ox) * 3;
       for (let c = 0; c < 3; c++) {

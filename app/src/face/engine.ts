@@ -85,7 +85,8 @@ export class TfliteFaceEngine implements FaceEngine {
         }`,
       );
     }
-    return l2Normalize(asNumberArray(output));
+    const norm = l2Normalize(asNumberArray(output));
+    return norm;
   }
 
   async scoreLive(input: TensorInput): Promise<number> {

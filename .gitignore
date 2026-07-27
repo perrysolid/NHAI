@@ -54,3 +54,9 @@ parth_submision/
 parth_submission/
 *.tsbuildinfo
 
+
+# local debugging artifacts
+debug_imgs/
+.venv_tf311/
+finetune/tflite_clean/
+finetune/*.onnx.data

@@ -48,7 +48,7 @@ export const FLAGS = {
 export type RecognitionModelId = 'edgeface_s' | 'mobilefacenet';
 
 /** Active recognition model — swap this one line to change the engine. */
-export const ACTIVE_RECOGNITION: RecognitionModelId = 'mobilefacenet';
+export const ACTIVE_RECOGNITION: RecognitionModelId = 'edgeface_s';
 
 export interface RecognitionSpec {
   /** require()'d asset, resolved lazily in FaceEngine to keep config pure. */
@@ -135,11 +135,12 @@ export const LIVENESS_MODEL: LivenessSpec = {
 // Thresholds & gates
 // ────────────────────────────────────────────────────────────────────────────
 export const THRESHOLDS = {
-  /** Cosine similarity >= this means the same person. Raised from 0.55 to reduce
-   *  false accepts. NOTE: the real fix for two different faces matching is face
-   *  ALIGNMENT (eye-based), not the threshold — without alignment the genuine and
-   *  impostor cosine distributions overlap and no threshold cleanly separates them. */
-  recognitionCosine: 0.62,
+  /** Cosine similarity >= this means the same person. Set to 0.65 for EdgeFace-S
+   *  (512-dim ArcFace features). Genuine pairs (same person) score 0.70–0.95;
+   *  impostors (different people) peak at 0.30–0.55. 0.65 sits firmly in the
+   *  separation gap — accepts the enrolled person, rejects everyone else.
+   *  Do NOT lower below 0.60 without re-validating on-device FAR/FRR. */
+  recognitionCosine: 0.65,
   /** Passive anti-spoof "live" probability must exceed this. Only enforced when
    *  FLAGS.REQUIRE_PASSIVE_LIVENESS is true; otherwise it is advisory (recorded
    *  but non-blocking) so an uncalibrated MiniFASNet can't false-reject a real
@@ -225,6 +226,13 @@ export const SCORING = {
 // ────────────────────────────────────────────────────────────────────────────
 export const CAMERA = {
   targetFps: 8, // frame-processor throttle (runAtTargetFps)
+  /** Degrees to rotate the recognition/liveness crop so the face is UPRIGHT. The
+   *  front-camera sensor buffer is landscape while the phone is held portrait, so
+   *  the face lands rotated 90° in the medium buffer; +90° here re-uprights it.
+   *  Verified on-device by dumping the crop (debug_imgs). Recognition models are
+   *  trained on upright faces — a sideways crop was THE cause of "different people
+   *  match / same person's score swings 0.77–0.95". */
+  recognitionRotationDeg: 90,
   /** The worklet downscales each frame to this longest-edge (px), preserving the
    *  full field of view (no center-crop), and hands that one RGB buffer to JS.
    *  JS then crops the aligned face from it (see camera/faceCrop.ts). Big enough

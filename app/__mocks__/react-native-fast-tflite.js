@@ -7,14 +7,14 @@
 // at index 1 so the liveness softmax(live=index 1) lands ~0.99, while any two
 // embeddings from it are identical => cosine 1.0 for recognition.
 function fixedOutput() {
-  const out = new Float32Array(192).fill(0.1);
+  const out = new Float32Array(512).fill(0.1);
   out[1] = 10; // dominant "live" logit + a stable embedding direction
   return out;
 }
 
 const makeModel = () => ({
   inputs: [{shape: [1, 112, 112, 3]}],
-  outputs: [{shape: [1, 192]}],
+  outputs: [{shape: [1, 512]}],
   run: async () => [fixedOutput()],
 });
 

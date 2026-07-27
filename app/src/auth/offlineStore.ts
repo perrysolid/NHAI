@@ -1,4 +1,9 @@
-import {LIVENESS_LOCKOUT, THRESHOLDS} from '../config';
+import {
+  LIVENESS_LOCKOUT,
+  THRESHOLDS,
+  RECOGNITION_MODELS,
+  ACTIVE_RECOGNITION,
+} from '../config';
 import {averageEmbeddings, matchEmbedding, type Embedding} from '../face/math';
 import type {Site} from '../location/types';
 
@@ -13,6 +18,7 @@ export interface KeyValueStorage {
   set(key: string, value: string): void;
   delete(key: string): void;
 }
+
 
 export interface Enrollment {
   userId: string;
@@ -84,7 +90,16 @@ export class OfflineAuthStore {
   }
 
   listEnrollments(): Enrollment[] {
-    return readJson<Enrollment[]>(this.storage, ENROLLMENTS_KEY, []);
+    const all = readJson<Enrollment[]>(this.storage, ENROLLMENTS_KEY, []);
+    const expectedLength =
+      RECOGNITION_MODELS[ACTIVE_RECOGNITION].embeddingLength;
+    const filtered = all.filter(
+      e => e.embedding && e.embedding.length === expectedLength,
+    );
+    if (all.length > 0 && filtered.length === 0) {
+      console.warn(`[OFFLINE_STORE] Found ${all.length} enrollments in DB, but ALL were ignored because length (${all[0]?.embedding?.length}) != expected (${expectedLength}). Please re-enroll!`);
+    }
+    return filtered;
   }
 
   saveEnrollment(
@@ -94,6 +109,7 @@ export class OfflineAuthStore {
     role?: string,
   ): void {
     const embedding = averageEmbeddings(samples);
+    console.log(`[OFFLINE_STORE] saveEnrollment: userId='${userId}', averaged ${samples.length} samples into ${embedding.length}-dim vector.`);
     const next = this.listEnrollments().filter(e => e.userId !== userId);
     next.push({
       userId,
@@ -115,8 +131,22 @@ export class OfflineAuthStore {
 
   verify(probe: Embedding): VerifyOutcome {
     let best: VerifyOutcome = {ok: false, matchScore: -1};
-    for (const enrollment of this.listEnrollments()) {
+    const enrollments = this.listEnrollments();
+    if (enrollments.length === 0) {
+      console.warn('[VERIFY] No valid enrollments found in DB. Please enroll first.');
+      return best;
+    }
+    for (const enrollment of enrollments) {
+      if (probe.length !== enrollment.embedding.length) {
+        console.warn(
+          `[VERIFY] Dim mismatch: stored=${enrollment.embedding.length}, probe=${probe.length}. Re-enroll!`,
+        );
+        continue;
+      }
       const match = matchEmbedding(probe, enrollment.embedding);
+      console.log(
+        `[VERIFY] userId='${enrollment.userId}' cosine=${match.cosine.toFixed(4)} threshold=${THRESHOLDS.recognitionCosine} matched=${match.matched}`,
+      );
       if (match.cosine > best.matchScore) {
         best = {
           ok: match.matched,
@@ -125,6 +155,7 @@ export class OfflineAuthStore {
         };
       }
     }
+    console.log(`[VERIFY] Final: best=${best.matchScore.toFixed(4)} ok=${best.ok} userId='${best.userId ?? 'none'}'`);
     if (best.matchScore < THRESHOLDS.recognitionCosine) {
       best.ok = false;
     }
