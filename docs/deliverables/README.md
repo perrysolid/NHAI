@@ -3,7 +3,7 @@
 This folder contains the installable Android build for hackathon judges plus the iOS packaging notes.
 
 Direct APK:
-https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
+https://github.com/perrysolid/NHAI/raw/feature/edgeface-s-int8-recognition/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
 
 ## Android APKs
 
@@ -23,7 +23,7 @@ Package details:
 
 - App id: `com.datalakefaceauth`
 - Version: `3.0` (versionCode 22)
-- Branch: `main`
+- Branch: `feature/edgeface-s-int8-recognition`
 - Recognition model: **EdgeFace-S Float32** (14 MB, 512-dim ArcFace — full precision)
 - Threshold: `0.65` cosine similarity (genuine ~0.90–0.98, impostor ~0.20–0.50)
 - Android minimum: API 26 / Android 8.0+
