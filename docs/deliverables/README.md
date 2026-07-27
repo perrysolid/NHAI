@@ -3,7 +3,7 @@
 This folder contains the installable Android build for hackathon judges plus the iOS packaging notes.
 
 Direct APK:
-https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
+https://github.com/perrysolid/NHAI/raw/feature/edgeface-s-int8-recognition/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
 
 ## Android APKs
 
@@ -15,18 +15,20 @@ adb install -r docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
 
 | File | Target device | Size | SHA-256 |
 |------|---------------|------|---------|
-| `DatalakeFaceAuth-android-universal-release.apk` | One APK for Android judge phones: arm64-v8a + armeabi-v7a | 70 MB | `0d3f3e1f0e116a76e30941ea96ba0e101809850a5e58cb95464682e61eb021ef` |
-| `DatalakeFaceAuth-android-arm64-v8a-release.apk` | Modern 64-bit Android phones | 51 MB | `06b2ccebe1bf97b2eda3811fa1b03e5485115dac09c1994d42257bcab97999a5` |
-| `DatalakeFaceAuth-android-armeabi-v7a-release.apk` | Older 32-bit Android phones | 41 MB | `54fbdd340404a2f3ad788e9cbc87e2a2ef1028f366944e5a48c3d333fbd17711` |
+| `DatalakeFaceAuth-android-universal-release.apk` | One APK for all Android phones: arm64-v8a + armeabi-v7a | 67 MB | `29c486c6b80932103968fa53bf638f8c4d666e128344a53bdd8524e52a3a463b` |
+| `DatalakeFaceAuth-android-arm64-v8a-release.apk` | Modern 64-bit Android phones (recommended) | 47 MB | `c97d833cfc765899ff548682909dfd7e452b85dd9389f5b84182e5518f619f99` |
+| `DatalakeFaceAuth-android-armeabi-v7a-release.apk` | Older 32-bit Android phones | 37 MB | `7810f2e752fe8f1f90549c50ce66ddcffa9b71e497d9a04eb1efbf54da49af52` |
 
 Package details:
 
 - App id: `com.datalakefaceauth`
-- Version: `3.0` (versionCode 22 — matches the in-app `v3.0 · build 22` tag)
+- Version: `3.0` (versionCode 22)
+- Branch: `feature/edgeface-s-int8-recognition`
+- Recognition model: **EdgeFace-S INT8 Dynamic Range** (4.1 MB, 512-dim ArcFace)
 - Android minimum: API 26 / Android 8.0+
 - Auth path: verification is fully offline — liveness, recognition, matching, and queueing need no network. Enrollment is an online registration (template + role sent to the backend); attendance syncs when back online.
-- Bundled model assets were verified inside the release APK.
-- The Gradle release build also emits smaller ABI-split APKs locally if needed.
+- Bundled model assets: `edgeface_s.tflite` (4.1 MB) + `minifasnet.tflite` (5.7 MB)
+
 
 ## iOS
 
