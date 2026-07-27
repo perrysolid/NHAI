@@ -117,7 +117,7 @@ const ENROLL_ROLES: {id: string; label: string}[] = [
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
 // Bump alongside android versionName so a screenshot reveals the running build.
-const APP_VERSION = 'v2.9 · build 20';
+const APP_VERSION = 'v2.9 · build 21';
 
 /**
  * One downscaled full-frame RGB buffer plus the face box already scaled into its
@@ -841,6 +841,17 @@ export default function CameraScreen(): React.JSX.Element {
   }, [onCaptureEnrollStep]);
 
   const startVerify = useCallback(() => {
+    const lockoutRemaining = store.getLivenessLockoutRemainingMs();
+    if (lockoutRemaining > 0) {
+      setVerdict({
+        ok: false,
+        title: 'Too many failed attempts',
+        detail: `Wait ${Math.ceil(
+          lockoutRemaining / 1000,
+        )}s before trying again`,
+      });
+      return;
+    }
     if (store.listEnrollments().length === 0) {
       setVerdict({
         ok: false,
@@ -958,8 +969,13 @@ export default function CameraScreen(): React.JSX.Element {
           userId: userId.trim() || 'unidentified',
           livenessScore: passiveScore,
           matchScore: verify.matchScore,
+          livenessPassed: false,
+          score: composite.overall,
+          confidence,
+          latencyMs,
           location,
         });
+        store.recordLivenessAttempt(false);
         refreshCounts();
         showVerifyResult('failure');
         setVerdict({
@@ -995,8 +1011,13 @@ export default function CameraScreen(): React.JSX.Element {
           userId: verify.userId,
           livenessScore: Math.max(passiveScore, THRESHOLDS.livenessPassive),
           matchScore: verify.matchScore,
+          livenessPassed: true,
+          score: composite.overall,
+          confidence,
+          latencyMs,
           location,
         });
+        store.recordLivenessAttempt(true);
         refreshCounts();
         showVerifyResult('failure');
         setVerdict({
@@ -1012,8 +1033,13 @@ export default function CameraScreen(): React.JSX.Element {
         userId: verify.userId,
         livenessScore: Math.max(passiveScore, THRESHOLDS.livenessPassive),
         matchScore: verify.matchScore,
+        livenessPassed: true,
+        score: composite.overall,
+        confidence,
+        latencyMs,
         location,
       });
+      store.recordLivenessAttempt(true);
       refreshCounts();
       showVerifyResult('success');
       setVerdict({
@@ -1050,7 +1076,8 @@ export default function CameraScreen(): React.JSX.Element {
         busyRef.current ||
         challengeRef.current !== null ||
         verifyResultActiveRef.current ||
-        !verifyArmedRef.current
+        !verifyArmedRef.current ||
+        store.getLivenessLockoutRemainingMs() > 0
       ) {
         return;
       }
@@ -1058,7 +1085,7 @@ export default function CameraScreen(): React.JSX.Element {
       startVerify();
     }, CAMERA.autoLoopIntervalMs);
     return () => clearInterval(id);
-  }, [page, mode, engineState, startVerify]);
+  }, [page, mode, engineState, startVerify, store]);
 
   const livenessStatus = liveness?.status;
 
@@ -1106,11 +1133,26 @@ export default function CameraScreen(): React.JSX.Element {
           });
       }
       if (snap.status === 'failed') {
+        const fix = latestFixRef.current;
         store.queueAttendance({
           userId: userId.trim() || 'unidentified',
           livenessScore: 0,
           matchScore: 0,
+          livenessPassed: false,
+          ...(fix
+            ? {
+                location: {
+                  lat: fix.lat,
+                  lon: fix.lon,
+                  accuracyM: fix.accuracyM,
+                  mocked: fix.mocked,
+                  geofencePassed: false,
+                  distanceM: 0,
+                },
+              }
+            : {}),
         });
+        store.recordLivenessAttempt(false);
         refreshCounts();
         showVerifyResult('failure');
         setVerdict({

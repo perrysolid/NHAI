@@ -182,6 +182,16 @@ export const THRESHOLDS = {
 } as const;
 
 // ────────────────────────────────────────────────────────────────────────────
+// Liveness escalation lockout — rate-limits repeated failed attempts
+// ────────────────────────────────────────────────────────────────────────────
+export const LIVENESS_LOCKOUT = {
+  maxAttempts: 5,
+  windowMs: 300000,
+  baseDurationMs: 60000,
+  escalationFactor: 2,
+} as const;
+
+// ────────────────────────────────────────────────────────────────────────────
 // Drowsiness / attention monitoring (eye-landmark based, on-device)
 // ────────────────────────────────────────────────────────────────────────────
 export const DROWSINESS = {

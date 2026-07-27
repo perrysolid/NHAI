@@ -23,6 +23,9 @@ export interface SyncRecord {
   matchScore: number;
   matchDistance: number;
   deviceId: string;
+  confidence?: number;
+  score?: number;
+  latencyMs?: number;
   /** On-device geofence summary — omitted when no GPS fix was available. */
   lat?: number;
   lon?: number;
@@ -40,11 +43,15 @@ export function toSyncPayload(records: AttendanceRecord[]): {
     records: records.map(r => ({
       userId: r.userId,
       timestamp: r.timestamp,
-      livenessPassed: r.livenessScore >= THRESHOLDS.livenessSyncPass,
+      livenessPassed:
+        r.livenessPassed ?? r.livenessScore >= THRESHOLDS.livenessSyncPass,
       livenessScore: r.livenessScore,
       matchScore: r.matchScore,
       matchDistance: 1 - r.matchScore,
       deviceId: r.deviceId,
+      ...(r.confidence !== undefined ? {confidence: r.confidence} : {}),
+      ...(r.score !== undefined ? {score: r.score} : {}),
+      ...(r.latencyMs !== undefined ? {latencyMs: r.latencyMs} : {}),
       ...(r.location
         ? {
             lat: r.location.lat,
