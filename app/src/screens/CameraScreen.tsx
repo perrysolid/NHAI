@@ -118,7 +118,7 @@ const ENROLL_ROLES: {id: string; label: string}[] = [
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
 // Bump alongside android versionName so a screenshot reveals the running build.
-const APP_VERSION = 'v2.9 · build 21';
+const APP_VERSION = 'v3.0 · build 22';
 
 /**
  * One downscaled full-frame RGB buffer plus the face box already scaled into its
