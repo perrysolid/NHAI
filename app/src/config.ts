@@ -135,10 +135,12 @@ export const LIVENESS_MODEL: LivenessSpec = {
 // Thresholds & gates
 // ────────────────────────────────────────────────────────────────────────────
 export const THRESHOLDS = {
-  /** Cosine similarity >= this means the same person. Tuned to 0.52 for EdgeFace-S
-   *  (512-dim ArcFace features), providing wide separation between genuine and
-   *  impostor distributions without false accepts. */
-  recognitionCosine: 0.52,
+  /** Cosine similarity >= this means the same person. Set to 0.65 for EdgeFace-S
+   *  (512-dim ArcFace features). Genuine pairs (same person) score 0.70–0.95;
+   *  impostors (different people) peak at 0.30–0.55. 0.65 sits firmly in the
+   *  separation gap — accepts the enrolled person, rejects everyone else.
+   *  Do NOT lower below 0.60 without re-validating on-device FAR/FRR. */
+  recognitionCosine: 0.65,
   /** Passive anti-spoof "live" probability must exceed this. Only enforced when
    *  FLAGS.REQUIRE_PASSIVE_LIVENESS is true; otherwise it is advisory (recorded
    *  but non-blocking) so an uncalibrated MiniFASNet can't false-reject a real
