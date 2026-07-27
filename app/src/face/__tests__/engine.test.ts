@@ -1,7 +1,7 @@
 import {preprocessRgb} from '../engine';
-import {RECOGNITION_MODELS, LIVENESS_MODEL} from '../../config';
+import {RECOGNITION_MODELS, LIVENESS_MODEL, ACTIVE_RECOGNITION} from '../../config';
 
-const REC = RECOGNITION_MODELS.mobilefacenet; // 112x112x3 float32, mean/std 0.5
+const REC = RECOGNITION_MODELS[ACTIVE_RECOGNITION]; // 112x112x3 float32, mean/std 0.5
 const PIXELS = REC.inputSize * REC.inputSize; // 12544
 const RGB_BYTES = PIXELS * REC.channels; // 37632
 

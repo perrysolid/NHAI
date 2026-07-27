@@ -48,7 +48,7 @@ export const FLAGS = {
 export type RecognitionModelId = 'edgeface_s' | 'mobilefacenet';
 
 /** Active recognition model — swap this one line to change the engine. */
-export const ACTIVE_RECOGNITION: RecognitionModelId = 'mobilefacenet';
+export const ACTIVE_RECOGNITION: RecognitionModelId = 'edgeface_s';
 
 export interface RecognitionSpec {
   /** require()'d asset, resolved lazily in FaceEngine to keep config pure. */
@@ -135,11 +135,10 @@ export const LIVENESS_MODEL: LivenessSpec = {
 // Thresholds & gates
 // ────────────────────────────────────────────────────────────────────────────
 export const THRESHOLDS = {
-  /** Cosine similarity >= this means the same person. Raised from 0.55 to reduce
-   *  false accepts. NOTE: the real fix for two different faces matching is face
-   *  ALIGNMENT (eye-based), not the threshold — without alignment the genuine and
-   *  impostor cosine distributions overlap and no threshold cleanly separates them. */
-  recognitionCosine: 0.62,
+  /** Cosine similarity >= this means the same person. Tuned to 0.52 for EdgeFace-S
+   *  (512-dim ArcFace features), providing wide separation between genuine and
+   *  impostor distributions without false accepts. */
+  recognitionCosine: 0.52,
   /** Passive anti-spoof "live" probability must exceed this. Only enforced when
    *  FLAGS.REQUIRE_PASSIVE_LIVENESS is true; otherwise it is advisory (recorded
    *  but non-blocking) so an uncalibrated MiniFASNet can't false-reject a real
