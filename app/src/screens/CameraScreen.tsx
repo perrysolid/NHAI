@@ -9,6 +9,7 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Image,
   Linking,
   Modal,
@@ -340,6 +341,106 @@ export default function CameraScreen(): React.JSX.Element {
   useEffect(() => {
     setSpeechEnabled(voice);
   }, [voice]);
+
+  // Pull the admin-assigned geofence site(s) for this device's enrolled
+  // inspector on every app launch. Retries with backoff (0 → 5 → 15 → 30 s)
+  // so it survives a cold-start backend (e.g. Render free tier takes ~30 s to
+  // wake). Already-cached MMKV sites remain valid during the wait, so the
+  // geofence never goes blank mid-session.
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'test') {
+      return;
+    }
+    const inspectorId =
+      store.latestEnrollment()?.userId?.trim() ?? '';
+    if (!inspectorId) {
+      return;
+    }
+    let cancelled = false;
+    const RETRY_DELAYS = [0, 5000, 15000, 30000]; // ms between attempts
+
+    const attempt = async (delayMs: number): Promise<void> => {
+      if (delayMs > 0) {
+        await new Promise(res => setTimeout(res, delayMs));
+      }
+      if (cancelled) {
+        return;
+      }
+      const net = await NetInfo.fetch();
+      if (!net.isConnected) {
+        return;
+      }
+      try {
+        const sites = await fetchAssignedSites({
+          baseUrl: baseUrlFromSyncUrl(SYNC.url),
+          apiKey: SYNC.apiKey,
+          userId: inspectorId,
+        });
+        if (cancelled) {
+          return;
+        }
+        if (sites.length > 0) {
+          store.saveSites(sites);
+          setSiteSummary(summarizeSites(sites));
+          // eslint-disable-next-line no-console
+          console.log('[SITES] fetched on startup', JSON.stringify(sites.map(s => ({id: s.id, name: s.name, userId: s.assignedUserId}))));
+        } else {
+          // eslint-disable-next-line no-console
+          console.log('[SITES] startup fetch returned 0 sites for', inspectorId, '(backend may be waking up)');
+        }
+      } catch {
+        /* backend unreachable — retain any previously cached sites */
+        // eslint-disable-next-line no-console
+        console.log('[SITES] fetch failed (network/timeout) for', inspectorId);
+      }
+    };
+
+    // Fire all attempts with increasing delays; each is independent so a
+    // late successful attempt overwrites an earlier empty result.
+    RETRY_DELAYS.forEach(delay => attempt(delay));
+
+    return () => {
+      cancelled = true;
+    };
+  // store is a stable useMemo ref; no other deps needed.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store]);
+
+  // Automatically re-fetch assigned sites whenever the app returns to the
+  // foreground ('active'). Ensures new site assignments made in the admin
+  // portal are pulled without requiring an app restart or manual sync.
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'test') {
+      return;
+    }
+    const unsub = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active') {
+        const inspectorId = store.latestEnrollment()?.userId?.trim() ?? '';
+        if (!inspectorId) {
+          return;
+        }
+        NetInfo.fetch().then(async state => {
+          if (!state.isConnected) {
+            return;
+          }
+          try {
+            const sites = await fetchAssignedSites({
+              baseUrl: baseUrlFromSyncUrl(SYNC.url),
+              apiKey: SYNC.apiKey,
+              userId: inspectorId,
+            });
+            if (sites.length > 0) {
+              store.saveSites(sites);
+              setSiteSummary(summarizeSites(sites));
+            }
+          } catch {
+            /* ignore network/offline errors */
+          }
+        });
+      }
+    });
+    return () => unsub.remove();
+  }, [store]);
 
   // Keep a fresh GPS fix cached while on the camera so verify reads it instantly
   // (no wait, no inflated latency). Fully offline — GPS needs no network.
@@ -952,6 +1053,27 @@ export default function CameraScreen(): React.JSX.Element {
         maxAccuracyM: GEOFENCE.maxAccuracyM,
         rejectMocked: GEOFENCE.rejectMocked,
       });
+      // Keep the live HUD in sync with this just-measured result.
+      if (activeSites.length > 0) {
+        if (!fix) {
+          setGeoStatus({reason: 'no_fix', inside: false});
+        } else {
+          setGeoStatus({
+            reason: geo.reason,
+            siteName: geo.siteName,
+            inside: geo.insideSite,
+          });
+        }
+      }
+      // eslint-disable-next-line no-console
+      console.log('[GEO]', JSON.stringify({
+        sites: activeSites.length,
+        fix: fix ? {lat: fix.lat.toFixed(5), lon: fix.lon.toFixed(5), accuracyM: Math.round(fix.accuracyM), mocked: fix.mocked} : null,
+        reason: geo.reason,
+        passed: geo.passed,
+        siteName: geo.siteName ?? null,
+        distanceM: geo.distanceM,
+      }));
       const location: RecordLocation | undefined = fix
         ? {
             lat: fix.lat,
@@ -1191,7 +1313,8 @@ export default function CameraScreen(): React.JSX.Element {
       // cache them locally for offline use. Independent of the (maybe mocked)
       // sync above; if the backend is unreachable we keep any cached sites.
       let sitesNote = '';
-      const inspectorId = userId.trim();
+      const inspectorId =
+        userId.trim() || (store.latestEnrollment()?.userId?.trim() ?? '');
       if (inspectorId) {
         try {
           const sites = await fetchAssignedSites({
@@ -1200,6 +1323,7 @@ export default function CameraScreen(): React.JSX.Element {
             userId: inspectorId,
           });
           store.saveSites(sites);
+          setSiteSummary(summarizeSites(sites));
           sitesNote = sites.length
             ? ` · ${sites.length} geofence zone${
                 sites.length === 1 ? '' : 's'
@@ -1246,13 +1370,35 @@ export default function CameraScreen(): React.JSX.Element {
     });
   }, [refreshCounts, store]);
 
-  // Refresh the settings-sheet zone summary whenever the sheet opens, so it
-  // reflects sites just provisioned via Sync (or a prior device pin).
+  // Refresh the settings-sheet zone summary whenever the sheet opens, and trigger
+  // a background network fetch so newly provisioned sites appear right away.
   useEffect(() => {
     if (profileOpen) {
       setSiteSummary(summarizeSites(store.getSites()));
+      const inspectorId =
+        userId.trim() || (store.latestEnrollment()?.userId?.trim() ?? '');
+      if (inspectorId) {
+        NetInfo.fetch().then(async state => {
+          if (!state.isConnected) {
+            return;
+          }
+          try {
+            const sites = await fetchAssignedSites({
+              baseUrl: baseUrlFromSyncUrl(SYNC.url),
+              apiKey: SYNC.apiKey,
+              userId: inspectorId,
+            });
+            if (sites.length > 0) {
+              store.saveSites(sites);
+              setSiteSummary(summarizeSites(sites));
+            }
+          } catch {
+            /* ignore network/offline errors */
+          }
+        });
+      }
     }
-  }, [profileOpen, store]);
+  }, [profileOpen, store, userId]);
 
   // "Pin geofence to my location" — capture the current GPS fix and save it as a
   // circular site on-device. Works with zero admin/backend/userId dependency, so

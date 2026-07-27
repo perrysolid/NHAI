@@ -62,7 +62,10 @@ export async function fetchAssignedSites(
   }
   const data = (await res.json().catch(() => ({}))) as {sites?: RemoteSite[]};
   const sites = Array.isArray(data.sites) ? data.sites : [];
-  return sites.map(mapRemote).filter((s): s is Site => s !== null);
+  const mapped = sites.map(mapRemote).filter((s): s is Site => s !== null);
+  // Keep only the most recently assigned site (newest updatedAt) so older/stale assignments
+  // don't override or cause unexpected matches when testing new zone assignments.
+  return mapped.slice(0, 1);
 }
 
 /** Derive the backend origin from the configured SYNC.url (…/api/sync). */

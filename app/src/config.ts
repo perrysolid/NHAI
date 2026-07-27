@@ -264,10 +264,9 @@ export const SYNC = {
 // ────────────────────────────────────────────────────────────────────────────
 export const GEOFENCE = {
   /** Reject GPS fixes whose horizontal accuracy radius exceeds this (metres).
-   *  100 m (not 50) because a phone genuinely on-site often reports a 30–70 m
-   *  radius — especially offline (no A-GPS) or near buildings — and rejecting
-   *  those as "poor accuracy" made real on-site checks fail. */
-  maxAccuracyM: 100,
+   *  50 m is tight enough for a field work-site yet lenient enough for phones
+   *  near buildings where the OS often reports 20–45 m accuracy. */
+  maxAccuracyM: 50,
   /** Radius (metres) of the circle created by the on-device "Pin geofence to my
    *  location" action. Comfortably covers a site/room around the pinned point. */
   pinRadiusM: 150,
@@ -277,9 +276,11 @@ export const GEOFENCE = {
    *  flagged. Keep false until SITES holds a real site at your demo location,
    *  otherwise every verify fails the geofence. */
   enforce: false,
-  /** getCurrentPosition timeout (ms) and how stale a cached fix may be (ms). */
+  /** getCurrentPosition timeout (ms). */
   fixTimeoutMs: 8000,
-  maxFixAgeMs: 15000,
+  /** How stale a BACKGROUND polling fix may be (ms). At verify time we always
+   *  request a fresh fix (maximumAge: 0) so this only affects the passive HUD. */
+  maxFixAgeMs: 5000,
 } as const;
 
 /**
