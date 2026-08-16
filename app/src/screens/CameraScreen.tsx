@@ -62,7 +62,10 @@ import type {
   GateResult,
 } from '../camera/types';
 import {OfflineAuthStore} from '../auth/offlineStore';
-import {createEncryptedAuthStore} from '../auth/mmkvStore';
+import {
+  createCalibrationRecorder,
+  createEncryptedAuthStore,
+} from '../auth/mmkvStore';
 import {
   pick,
   GATE_TEXT,
@@ -244,6 +247,12 @@ export default function CameraScreen(): React.JSX.Element {
   >(null);
 
   const store = useMemo<OfflineAuthStore>(() => createEncryptedAuthStore(), []);
+  // Deadline calibration recorder — only constructed when the flag is on, so a
+  // shipped build carries no diagnostics state at all.
+  const calibration = useMemo(
+    () => (FLAGS.CALIBRATE_LIVENESS ? createCalibrationRecorder() : null),
+    [],
+  );
   const locationProvider = useMemo(() => createLocationProvider(), []);
   const latestFixRef = useRef<LocationFix | null>(null);
   const engineRef = useRef<FaceEngine | null>(null);
@@ -360,8 +369,7 @@ export default function CameraScreen(): React.JSX.Element {
     if (process.env.NODE_ENV === 'test') {
       return;
     }
-    const inspectorId =
-      store.latestEnrollment()?.userId?.trim() ?? '';
+    const inspectorId = store.latestEnrollment()?.userId?.trim() ?? '';
     if (!inspectorId) {
       return;
     }
@@ -391,15 +399,27 @@ export default function CameraScreen(): React.JSX.Element {
         if (sites.length > 0) {
           store.saveSites(sites);
           setSiteSummary(summarizeSites(sites));
-          // eslint-disable-next-line no-console
-          console.log('[SITES] fetched on startup', JSON.stringify(sites.map(s => ({id: s.id, name: s.name, userId: s.assignedUserId}))));
+
+          console.log(
+            '[SITES] fetched on startup',
+            JSON.stringify(
+              sites.map(s => ({
+                id: s.id,
+                name: s.name,
+                userId: s.assignedUserId,
+              })),
+            ),
+          );
         } else {
-          // eslint-disable-next-line no-console
-          console.log('[SITES] startup fetch returned 0 sites for', inspectorId, '(backend may be waking up)');
+          console.log(
+            '[SITES] startup fetch returned 0 sites for',
+            inspectorId,
+            '(backend may be waking up)',
+          );
         }
       } catch {
         /* backend unreachable — retain any previously cached sites */
-        // eslint-disable-next-line no-console
+
         console.log('[SITES] fetch failed (network/timeout) for', inspectorId);
       }
     };
@@ -411,8 +431,7 @@ export default function CameraScreen(): React.JSX.Element {
     return () => {
       cancelled = true;
     };
-  // store is a stable useMemo ref; no other deps needed.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // store is a stable useMemo ref; no other deps needed.
   }, [store]);
 
   // Automatically re-fetch assigned sites whenever the app returns to the
@@ -1039,11 +1058,23 @@ export default function CameraScreen(): React.JSX.Element {
       verifyResultTimerRef.current = null;
     }
     setVerifyResultTone(null);
-    const challenge = new ActiveLivenessChallenge();
+    const challenge = new ActiveLivenessChallenge(
+      undefined,
+      undefined,
+      undefined,
+      calibration
+        ? timing => {
+            calibration.record({...timing, at: Date.now()});
+            console.log(
+              `[CALIB] ${timing.action} ${timing.ms}ms ${timing.outcome}`,
+            );
+          }
+        : undefined,
+    );
     challengeRef.current = challenge;
     setLiveness(challenge.start(Date.now()));
     setVerdict(null);
-  }, [store]);
+  }, [calibration, store]);
 
   const runVerify = useCallback(
     async (activeStatus: LivenessStatus) => {
@@ -1135,15 +1166,25 @@ export default function CameraScreen(): React.JSX.Element {
           });
         }
       }
-      // eslint-disable-next-line no-console
-      console.log('[GEO]', JSON.stringify({
-        sites: activeSites.length,
-        fix: fix ? {lat: fix.lat.toFixed(5), lon: fix.lon.toFixed(5), accuracyM: Math.round(fix.accuracyM), mocked: fix.mocked} : null,
-        reason: geo.reason,
-        passed: geo.passed,
-        siteName: geo.siteName ?? null,
-        distanceM: geo.distanceM,
-      }));
+
+      console.log(
+        '[GEO]',
+        JSON.stringify({
+          sites: activeSites.length,
+          fix: fix
+            ? {
+                lat: fix.lat.toFixed(5),
+                lon: fix.lon.toFixed(5),
+                accuracyM: Math.round(fix.accuracyM),
+                mocked: fix.mocked,
+              }
+            : null,
+          reason: geo.reason,
+          passed: geo.passed,
+          siteName: geo.siteName ?? null,
+          distanceM: geo.distanceM,
+        }),
+      );
       const location: RecordLocation | undefined = fix
         ? {
             lat: fix.lat,
@@ -1201,7 +1242,12 @@ export default function CameraScreen(): React.JSX.Element {
       if (GEOFENCE.enforce && !geo.passed) {
         store.queueAttendance({
           userId: verify.userId,
-          livenessScore: Math.max(passiveScore, THRESHOLDS.livenessPassive),
+          // The TRUE measured passive score. It was previously floored at
+          // THRESHOLDS.livenessPassive so a passing record would not look like a
+          // liveness failure, but livenessPassed already carries that verdict —
+          // and the floor destroyed the one signal needed to calibrate
+          // MiniFASNet and re-enable passive anti-spoof (CLAUDE.md §5).
+          livenessScore: passiveScore,
           matchScore: verify.matchScore,
           livenessPassed: true,
           score: composite.overall,
@@ -1223,7 +1269,9 @@ export default function CameraScreen(): React.JSX.Element {
       }
       store.queueAttendance({
         userId: verify.userId,
-        livenessScore: Math.max(passiveScore, THRESHOLDS.livenessPassive),
+        // True measured passive score — see the note above; livenessPassed
+        // carries the verdict, so this must stay unfudged for calibration.
+        livenessScore: passiveScore,
         matchScore: verify.matchScore,
         livenessPassed: true,
         score: composite.overall,
@@ -1546,6 +1594,22 @@ export default function CameraScreen(): React.JSX.Element {
           geofenceLabel={siteSummary}
           pinning={pinning}
           onPinGeofence={onPinGeofence}
+          onShowCalibration={
+            calibration
+              ? () => {
+                  const report = calibration.report();
+                  console.log(`[CALIB]\n${report}`);
+                  Alert.alert('Liveness timing', report, [
+                    {text: 'Close', style: 'cancel'},
+                    {
+                      text: 'Clear samples',
+                      style: 'destructive',
+                      onPress: () => calibration.clear(),
+                    },
+                  ]);
+                }
+              : undefined
+          }
         />
       </>
     );
@@ -1775,7 +1839,15 @@ export default function CameraScreen(): React.JSX.Element {
           ready={gate.ready}
           text={overlayText}
           subtitle={
-            verifyRunning ? `${Math.ceil(liveness!.msLeft / 1000)}s` : undefined
+            // Show the BINDING deadline, not the 30s backstop: the per-action
+            // clock is what actually fails the attempt, so counting down the
+            // whole-attempt window would tell the user they have 27s left while
+            // they in fact have 4 — a failure they could not have understood.
+            verifyRunning
+              ? `${Math.ceil(
+                  Math.min(liveness!.msLeft, liveness!.actionMsLeft) / 1000,
+                )}s`
+              : undefined
           }
           resultTone={verifyResultTone ?? undefined}
         />
@@ -1994,6 +2066,7 @@ function ProfilePanel({
   geofenceLabel,
   pinning,
   onPinGeofence,
+  onShowCalibration,
 }: {
   visible: boolean;
   identity: {userId: string; role?: string} | null;
@@ -2008,6 +2081,8 @@ function ProfilePanel({
   geofenceLabel: string;
   pinning: boolean;
   onPinGeofence: () => void;
+  /** Present only while FLAGS.CALIBRATE_LIVENESS is on. */
+  onShowCalibration?: () => void;
 }): React.JSX.Element {
   return (
     <Modal
@@ -2072,6 +2147,20 @@ function ProfilePanel({
               {pinning ? 'Getting GPS fix…' : 'Pin geofence to my location'}
             </Text>
           </TouchableOpacity>
+
+          {onShowCalibration && (
+            <>
+              <Text style={styles.sheetSection}>CALIBRATION</Text>
+              <SettingRow label="Timing capture" value="Recording" active />
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={onShowCalibration}>
+                <Text style={styles.secondaryButtonText}>
+                  Show timing report
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
 
           <Text style={styles.sheetSection}>DEVICE</Text>
           <TouchableOpacity style={styles.dangerButton} onPress={onReset}>

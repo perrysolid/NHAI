@@ -11,6 +11,7 @@
  */
 
 import type {Site} from './location/types';
+import type {LivenessActionKind} from './face/livenessActions';
 import {SYNC_URL, SYNC_API_KEY} from './secrets';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -40,6 +41,13 @@ export const FLAGS = {
   // active blink/smile/turn challenge remains the anti-spoof. Re-enable only after
   // validating the passive model on this hardware (a calibration task).
   PASSIVE_SCREEN_BLOCK: false,
+  /** Diagnostics: record prompt→confirmation timing for every liveness action so
+   *  LIVENESS_ACTION_DEADLINE_MS can be set from field data instead of guesses.
+   *  Adds a Settings → CALIBRATION section for reading the report on-device.
+   *  Turn ON for a calibration pass, OFF before shipping — see the runbook at
+   *  the top of face/livenessCalibration.ts. Recording never affects a verify
+   *  outcome; the deadlines themselves apply either way. */
+  CALIBRATE_LIVENESS: false,
 } as const;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -160,7 +168,8 @@ export const THRESHOLDS = {
   livenessActionCount: 2,
   /** Active-challenge window — shared across all `livenessActionCount`
    *  actions in one attempt, so it scales with the count: generous enough
-   *  that a real user isn't rushed even asking for all 3. */
+   *  that a real user isn't rushed even asking for all 3. Now a BACKSTOP: the
+   *  binding constraint is the per-action deadline below. */
   activeChallengeTimeoutMs: 30000,
   /** Quality gates — advisory guidance, kept forgiving for field use. Loosened
    *  so the "face centered" ready state (which drives hands-free auto-capture /
@@ -177,10 +186,59 @@ export const THRESHOLDS = {
   blinkOpenProb: 0.6,
   smileProb: 0.5,
   headTurnDeltaDeg: 12,
+  /** A turn action only captures its baseline yaw once the head is roughly
+   *  frontal. WHY: the turn is verified as a DELTA from the baseline (motion is
+   *  the security property — an absolute angle would let a photo held at a tilt
+   *  satisfy "turn left" without moving at all). But if the baseline is captured
+   *  while the user is already turned, the target lands outside the ±maxYawDeg
+   *  gate and the action becomes physically unsatisfiable — the user turns and
+   *  turns and it never registers. Waiting for frontal bounds the baseline so
+   *  baseline ± headTurnDeltaDeg always stays reachable. */
+  turnBaselineMaxYawDeg: 20,
   /** A synced record is flagged livenessPassed when its passive score clears
    *  this. Kept in config so the device and backend agree on one number. */
   livenessSyncPass: 0.7,
 } as const;
+
+/**
+ * Per-action response deadlines (ms) — the anti-relay control. EVERY action must
+ * have an entry: the Record is total over LivenessActionKind and
+ * face/liveness.ts looks it up directly with no fallback, so adding an action
+ * without a deadline is a compile error rather than a silent default.
+ *
+ * WHY THIS EXISTS. A human relay attack (an accomplice on a live video call
+ * performing the challenge while the phone films the call) defeats every
+ * behavioural challenge, because a real person can blink or smile on demand no
+ * matter how the actions are randomized. What a relay CANNOT remove is loop
+ * latency: prompt appears -> accomplice perceives it -> performs -> video
+ * travels back. That round trip is realistically 1-3s, and much longer when a
+ * human has to read the prompt aloud; a genuine user in front of the lens has
+ * none of it. This is the timing asymmetry from Face Flashing (NDSS 2018): a
+ * legitimate response costs ~nothing, a forged one costs time. See CLAUDE.md §5.
+ *
+ * Budget = prompt delivery + human reaction + performing the action. These are
+ * DELIBERATELY GENEROUS defaults, because every prompt is also SPOKEN
+ * (speech/tts.ts, rate 0.5 — deliberately slow for field clarity) and a user
+ * naturally waits for the Hindi/English voice line to finish before acting. A
+ * 1.5-2s deadline reads well on paper and false-rejects real inspectors; do not
+ * set one from the research number alone.
+ *
+ * Head turns get longer than blink/smile: turning and holding past the yaw delta
+ * is a slower physical movement than a blink, and the baseline yaw is only
+ * sampled on the first frame the action becomes current.
+ *
+ * CALIBRATION: these are guesses until measured on a real device. Flip
+ * FLAGS.CALIBRATE_LIVENESS and follow the runbook in face/livenessCalibration.ts
+ * — it records prompt->confirmation per action and prints the recommended
+ * values. Expect to land near 2500-3000ms. Every 1000ms removed here is directly
+ * subtracted from the attacker's relay budget.
+ */
+export const LIVENESS_ACTION_DEADLINE_MS: Record<LivenessActionKind, number> = {
+  blink: 4000,
+  smile: 4000,
+  turnLeft: 5000,
+  turnRight: 5000,
+};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Liveness escalation lockout — rate-limits repeated failed attempts
@@ -307,6 +365,7 @@ export const config = {
   RECOGNITION_MODELS,
   LIVENESS_MODEL,
   THRESHOLDS,
+  LIVENESS_ACTION_DEADLINE_MS,
   DROWSINESS,
   SCORING,
   CAMERA,

@@ -54,6 +54,28 @@ export function freshActionState(): ActionState {
 }
 
 /**
+ * Latch the reference yaw a turn is measured against, but only once the head is
+ * roughly frontal. Returns true when a baseline is available.
+ *
+ * A turn is verified as a DELTA (motion is the security property — an absolute
+ * angle would let a photo held at a tilt satisfy "turn left" without moving).
+ * The hazard is the baseline itself: latch it while the user already happens to
+ * be turned and the target angle lands outside the ±maxYawDeg quality gate, so
+ * the action can never be satisfied no matter how far they turn. Deferring until
+ * frontal bounds the baseline to ±turnBaselineMaxYawDeg, keeping
+ * baseline ± headTurnDeltaDeg comfortably inside the gate.
+ */
+function captureTurnBaseline(face: Face, state: ActionState): boolean {
+  if (state.baselineYaw === null) {
+    if (Math.abs(face.yawAngle) > THRESHOLDS.turnBaselineMaxYawDeg) {
+      return false; // not frontal yet — wait rather than latch a bad reference
+    }
+    state.baselineYaw = face.yawAngle;
+  }
+  return true;
+}
+
+/**
  * True the instant `kind` is confirmed on this frame. Mutates `state` to
  * track progress across calls for the SAME action — the caller must swap in
  * a fresh state when moving to a different action.
@@ -87,18 +109,18 @@ export function isActionSatisfied(
     case 'smile':
       return (face.smilingProbability ?? 0) >= THRESHOLDS.smileProb;
     case 'turnLeft': {
-      if (state.baselineYaw === null) {
-        state.baselineYaw = face.yawAngle;
+      if (!captureTurnBaseline(face, state)) {
+        return false;
       }
       // Signed delta (not abs()) so left and right are independently
       // verifiable — a leftward swing never satisfies "turn right".
-      return face.yawAngle - state.baselineYaw <= -THRESHOLDS.headTurnDeltaDeg;
+      return face.yawAngle - state.baselineYaw! <= -THRESHOLDS.headTurnDeltaDeg;
     }
     case 'turnRight': {
-      if (state.baselineYaw === null) {
-        state.baselineYaw = face.yawAngle;
+      if (!captureTurnBaseline(face, state)) {
+        return false;
       }
-      return face.yawAngle - state.baselineYaw >= THRESHOLDS.headTurnDeltaDeg;
+      return face.yawAngle - state.baselineYaw! >= THRESHOLDS.headTurnDeltaDeg;
     }
   }
 }
