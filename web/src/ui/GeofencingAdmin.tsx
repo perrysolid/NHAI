@@ -13,6 +13,21 @@ import 'leaflet/dist/leaflet.css';
 import {SYNC} from '../lib/config';
 import {getToken} from '../lib/adminAuth';
 
+/**
+ * Fresh admin headers per request. Module scope on purpose: as a value built
+ * during render it was captured by the useCallback closures below, so after a
+ * re-login those handlers kept sending the PREVIOUS token — and adding it to
+ * the dependency arrays would have defeated the memoisation, since the object
+ * identity changed on every render. A function reads the current token at call
+ * time and needs no dependency at all.
+ */
+function authHeaders(): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    'x-api-key': getToken(),
+  };
+}
+
 interface Site {
   id: string;
   name: string;
@@ -95,10 +110,6 @@ export default function GeofencingAdmin({
     }
   }, [query]);
 
-  const authHeaders = {
-    'Content-Type': 'application/json',
-    'x-api-key': getToken(),
-  };
 
   // Init the Leaflet map once (satellite imagery + place labels).
   useEffect(() => {
@@ -144,7 +155,7 @@ export default function GeofencingAdmin({
 
   const loadSites = useCallback(async () => {
     try {
-      const r = await fetch(`${SYNC.url}/api/sites`, {headers: authHeaders});
+      const r = await fetch(`${SYNC.url}/api/sites`, {headers: authHeaders()});
       const d = await r.json();
       if (d.ok) {
         setSites(d.sites);
@@ -152,7 +163,6 @@ export default function GeofencingAdmin({
     } catch {
       /* backend may be offline in mock mode */
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -198,7 +208,7 @@ export default function GeofencingAdmin({
     try {
       const r = await fetch(`${SYNC.url}/api/sites`, {
         method: 'POST',
-        headers: authHeaders,
+        headers: authHeaders(),
         body: JSON.stringify(body),
       });
       const d = await r.json();
@@ -213,7 +223,6 @@ export default function GeofencingAdmin({
     } catch {
       setStatus('Network error — is the backend reachable (VITE_SYNC_URL)?');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center, name, userId, role, radiusM, loadSites]);
 
   const remove = useCallback(
@@ -221,13 +230,12 @@ export default function GeofencingAdmin({
       try {
         await fetch(`${SYNC.url}/api/sites/${id}`, {
           method: 'DELETE',
-          headers: authHeaders,
+          headers: authHeaders(),
         });
         loadSites();
       } catch {
         setStatus('Could not delete.');
       }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     },
     [loadSites],
   );
