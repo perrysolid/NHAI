@@ -1,5 +1,38 @@
-import {OfflineAuthStore, createMemoryStorage} from '../offlineStore';
+import {
+  MAX_QUEUE_RECORDS,
+  OfflineAuthStore,
+  createMemoryStorage,
+} from '../offlineStore';
 import {RECOGNITION_MODELS, ACTIVE_RECOGNITION} from '../../config';
+
+/**
+ * Regression: the offline queue had no upper bound. Records are only removed
+ * when the backend ACKNOWLEDGES them, so anything the server permanently
+ * refuses — or any device that simply never regains connectivity — grew the
+ * queue forever inside encrypted MMKV on a 3 GB field phone.
+ */
+describe('offline queue is bounded', () => {
+  it('caps retained records and keeps the most recent', () => {
+    const store = new OfflineAuthStore(createMemoryStorage());
+    const overflow = 25;
+    for (let i = 0; i < MAX_QUEUE_RECORDS + overflow; i++) {
+      store.queueAttendance({
+        userId: 'u1',
+        livenessScore: 0.8,
+        matchScore: 0.9,
+        timestamp: i + 1,
+      });
+    }
+    const queue = store.getQueue();
+    expect(queue).toHaveLength(MAX_QUEUE_RECORDS);
+    // Oldest dropped, newest kept: a stuck record at the head must never be
+    // able to block newer attendance from being retained.
+    expect(queue[queue.length - 1].timestamp).toBe(
+      MAX_QUEUE_RECORDS + overflow,
+    );
+    expect(queue[0].timestamp).toBe(overflow + 1);
+  });
+});
 
 describe('OfflineAuthStore', () => {
   it('enrolls, verifies, queues, and purges records', () => {

@@ -11,8 +11,15 @@
  */
 import express from 'express';
 import cors from 'cors';
-import {apiKeyGuard, adminGuard, generateAdminToken} from './auth.js';
-import {createStore, sanitizeMany} from './store.js';
+import {
+  apiKeyGuard,
+  adminGuard,
+  adminPasscodeOk,
+  assertAuthConfigured,
+  generateAdminToken,
+  insecureAuthAllowed,
+} from './auth.js';
+import {createStore, sanitizeMany, RateLimitExceededError} from './store.js';
 import {createSitesStore, sanitizeSite, ROLES} from './sites.js';
 import {createEnrollmentsStore, sanitizeEnrollment} from './enrollments.js';
 import {renderDashboard} from './dashboard.js';
@@ -119,6 +126,16 @@ app.post('/api/sync', apiKeyGuard, async (req, res) => {
       acceptedRecords,
     });
   } catch (e) {
+    // Over budget is BACKPRESSURE, not bad data: answer 429 so the device keeps
+    // its records and retries. Dropping them here would destroy genuine
+    // attendance, because the device only purges what the server acknowledges.
+    if (e instanceof RateLimitExceededError) {
+      res.set('Retry-After', '60').status(429).json({
+        ok: false,
+        error: 'rate limited — retry shortly',
+      });
+      return;
+    }
     res
       .status(500)
       .json({ok: false, error: e instanceof Error ? e.message : 'db error'});
@@ -265,8 +282,7 @@ app.get('/api/sites/for/:userId', apiKeyGuard, async (req, res) => {
 });
 
 app.get('/admin', async (req, res) => {
-  const passcode = process.env.ADMIN_PASSCODE;
-  if (passcode && req.query.key !== passcode) {
+  if (!adminPasscodeOk(req.query.key)) {
     res.status(401).send('Unauthorized — append ?key=YOUR_PASSCODE');
     return;
   }
@@ -283,19 +299,30 @@ app.get('/admin', async (req, res) => {
 });
 
 const port = Number(process.env.PORT) || 4000;
+
+// Refuse to start rather than serve attendance data unprotected. Checked before
+// the store is even opened, so a misconfigured deploy fails immediately and
+// visibly instead of coming up healthy and wide open.
+try {
+  assertAuthConfigured();
+} catch (e) {
+  console.error(`[sync] ${e instanceof Error ? e.message : e}`);
+  process.exit(1);
+}
+
 Promise.all([store.init(), sitesStore.init(), enrollmentsStore.init()])
   .then(() => {
     app.listen(port, () => {
-      // eslint-disable-next-line no-console
       console.log(
         `[sync] listening on :${port} (store: ${store.kind})${
-          process.env.API_KEY ? '' : ' — WARNING: API_KEY unset, auth disabled'
+          insecureAuthAllowed()
+            ? ' — WARNING: ALLOW_INSECURE_NO_AUTH is set, authentication is DISABLED'
+            : ''
         }`,
       );
     });
   })
   .catch(e => {
-    // eslint-disable-next-line no-console
     console.error('[sync] failed to init store:', e);
     process.exit(1);
   });

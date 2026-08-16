@@ -153,6 +153,53 @@ describe('isActionSatisfied', () => {
     });
   });
 
+  describe('turn baseline latching', () => {
+    const beyondFrontal = THRESHOLDS.turnBaselineMaxYawDeg + 10;
+
+    it('does not latch a baseline while the head is already turned', () => {
+      const state = freshActionState();
+      expect(
+        isActionSatisfied('turnLeft', face({yawAngle: beyondFrontal}), state),
+      ).toBe(false);
+      expect(state.baselineYaw).toBeNull();
+    });
+
+    it('latches once the head returns to frontal, then measures from there', () => {
+      const state = freshActionState();
+      isActionSatisfied('turnLeft', face({yawAngle: beyondFrontal}), state);
+      isActionSatisfied('turnLeft', face({yawAngle: 5}), state);
+      expect(state.baselineYaw).toBe(5);
+      expect(
+        isActionSatisfied(
+          'turnLeft',
+          face({yawAngle: 5 - THRESHOLDS.headTurnDeltaDeg - 1}),
+          state,
+        ),
+      ).toBe(true);
+    });
+
+    it('keeps the turn target inside the quality gate from any baseline', () => {
+      // Regression: latching a baseline at an extreme yaw put the target angle
+      // outside ±maxYawDeg, making the action physically unsatisfiable — the
+      // user turns and turns and it never registers. Bounding the baseline is
+      // what guarantees the demanded angle is actually reachable.
+      const worstBaseline = THRESHOLDS.turnBaselineMaxYawDeg;
+      expect(worstBaseline + THRESHOLDS.headTurnDeltaDeg).toBeLessThan(
+        THRESHOLDS.maxYawDeg,
+      );
+    });
+
+    it('still requires motion — a tilted still face never satisfies a turn', () => {
+      // The delta (not an absolute angle) is the security property: a photo
+      // held at a fixed tilt must not pass "turn left".
+      const state = freshActionState();
+      const held = face({yawAngle: 15});
+      for (let i = 0; i < 20; i++) {
+        expect(isActionSatisfied('turnLeft', held, state)).toBe(false);
+      }
+    });
+  });
+
   describe('turnRight', () => {
     it('returns true when yaw increases by at least headTurnDeltaDeg', () => {
       const state = freshActionState();

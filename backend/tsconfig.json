@@ -13,5 +13,9 @@
     "declaration": false,
     "sourceMap": false
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  // Tests must never reach dist/ — the production image runs `node dist/index.js`
+  // and should not carry test code. `npm run typecheck` (tsconfig.test.json)
+  // still type-checks them.
+  "exclude": ["src/**/*.test.ts"]
 }

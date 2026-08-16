@@ -28,7 +28,9 @@ export function averageEmbeddings(samples: ArrayLike<number>[]): Embedding {
   const out = new Float32Array(length);
   for (const sample of samples) {
     if (sample.length !== length) {
-      throw new Error(`embedding lengths must match (got ${sample.length} vs ${length})`);
+      throw new Error(
+        `embedding lengths must match (got ${sample.length} vs ${length})`,
+      );
     }
     for (let i = 0; i < length; i++) {
       out[i] += sample[i];

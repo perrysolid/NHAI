@@ -36,6 +36,19 @@ export interface SyncRecord {
   distanceM?: number;
 }
 
+/**
+ * Cosine similarity is defined on [-1,1] and impostor pairs routinely score
+ * NEGATIVE, so `1 - cosine` can exceed 1. The backend's integrity guard rejects
+ * any matchDistance outside [0,1] (store.ts scoreSanity), and the client only
+ * purges records the server ACKNOWLEDGES — so an out-of-range distance became a
+ * poison pill that the queue could never drain. Clamp at the wire boundary; the
+ * locally stored matchScore keeps its true, unclamped value.
+ */
+function toMatchDistance(matchScore: number): number {
+  const distance = 1 - matchScore;
+  return Math.max(0, Math.min(1, distance));
+}
+
 export function toSyncPayload(records: AttendanceRecord[]): {
   records: SyncRecord[];
 } {
@@ -47,7 +60,7 @@ export function toSyncPayload(records: AttendanceRecord[]): {
         r.livenessPassed ?? r.livenessScore >= THRESHOLDS.livenessSyncPass,
       livenessScore: r.livenessScore,
       matchScore: r.matchScore,
-      matchDistance: 1 - r.matchScore,
+      matchDistance: toMatchDistance(r.matchScore),
       deviceId: r.deviceId,
       ...(r.confidence !== undefined ? {confidence: r.confidence} : {}),
       ...(r.score !== undefined ? {score: r.score} : {}),
