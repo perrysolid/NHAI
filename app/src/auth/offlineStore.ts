@@ -13,12 +13,19 @@ const DEVICE_KEY = 'dfa.deviceId.v1';
 const SITES_KEY = 'dfa.sites.v1';
 const LIVENESS_LOCKOUT_KEY = 'dfa.liveness.lockout.v1';
 
+/**
+ * Upper bound on the offline attendance queue. Sized for a genuinely long
+ * outage — at a few verifications per inspector per day this is months of
+ * backlog — while still guaranteeing the store cannot grow without limit on a
+ * low-RAM field device. See queueAttendance for the eviction policy.
+ */
+export const MAX_QUEUE_RECORDS = 1000;
+
 export interface KeyValueStorage {
   getString(key: string): string | undefined;
   set(key: string, value: string): void;
   delete(key: string): void;
 }
-
 
 export interface Enrollment {
   userId: string;
@@ -97,7 +104,9 @@ export class OfflineAuthStore {
       e => e.embedding && e.embedding.length === expectedLength,
     );
     if (all.length > 0 && filtered.length === 0) {
-      console.warn(`[OFFLINE_STORE] Found ${all.length} enrollments in DB, but ALL were ignored because length (${all[0]?.embedding?.length}) != expected (${expectedLength}). Please re-enroll!`);
+      console.warn(
+        `[OFFLINE_STORE] Found ${all.length} enrollments in DB, but ALL were ignored because length (${all[0]?.embedding?.length}) != expected (${expectedLength}). Please re-enroll!`,
+      );
     }
     return filtered;
   }
@@ -109,7 +118,9 @@ export class OfflineAuthStore {
     role?: string,
   ): void {
     const embedding = averageEmbeddings(samples);
-    console.log(`[OFFLINE_STORE] saveEnrollment: userId='${userId}', averaged ${samples.length} samples into ${embedding.length}-dim vector.`);
+    console.log(
+      `[OFFLINE_STORE] saveEnrollment: userId='${userId}', averaged ${samples.length} samples into ${embedding.length}-dim vector.`,
+    );
     const next = this.listEnrollments().filter(e => e.userId !== userId);
     next.push({
       userId,
@@ -133,7 +144,9 @@ export class OfflineAuthStore {
     let best: VerifyOutcome = {ok: false, matchScore: -1};
     const enrollments = this.listEnrollments();
     if (enrollments.length === 0) {
-      console.warn('[VERIFY] No valid enrollments found in DB. Please enroll first.');
+      console.warn(
+        '[VERIFY] No valid enrollments found in DB. Please enroll first.',
+      );
       return best;
     }
     for (const enrollment of enrollments) {
@@ -145,7 +158,9 @@ export class OfflineAuthStore {
       }
       const match = matchEmbedding(probe, enrollment.embedding);
       console.log(
-        `[VERIFY] userId='${enrollment.userId}' cosine=${match.cosine.toFixed(4)} threshold=${THRESHOLDS.recognitionCosine} matched=${match.matched}`,
+        `[VERIFY] userId='${enrollment.userId}' cosine=${match.cosine.toFixed(
+          4,
+        )} threshold=${THRESHOLDS.recognitionCosine} matched=${match.matched}`,
       );
       if (match.cosine > best.matchScore) {
         best = {
@@ -155,7 +170,11 @@ export class OfflineAuthStore {
         };
       }
     }
-    console.log(`[VERIFY] Final: best=${best.matchScore.toFixed(4)} ok=${best.ok} userId='${best.userId ?? 'none'}'`);
+    console.log(
+      `[VERIFY] Final: best=${best.matchScore.toFixed(4)} ok=${
+        best.ok
+      } userId='${best.userId ?? 'none'}'`,
+    );
     if (best.matchScore < THRESHOLDS.recognitionCosine) {
       best.ok = false;
     }
@@ -190,7 +209,16 @@ export class OfflineAuthStore {
     };
     const queue = this.getQueue();
     queue.push(record);
-    writeJson(this.storage, QUEUE_KEY, queue);
+    // Bound the queue. Records leave only when the backend ACKNOWLEDGES them,
+    // so a record the server permanently refuses — or a device that never
+    // regains connectivity — would otherwise grow this forever inside MMKV on a
+    // 3 GB field phone. Drop from the FRONT: the oldest entries are both the
+    // least operationally useful and the likeliest to be permanently stuck.
+    const trimmed =
+      queue.length > MAX_QUEUE_RECORDS
+        ? queue.slice(queue.length - MAX_QUEUE_RECORDS)
+        : queue;
+    writeJson(this.storage, QUEUE_KEY, trimmed);
     return record;
   }
 
