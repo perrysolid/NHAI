@@ -108,7 +108,28 @@ export class OfflineAuthStore {
         `[OFFLINE_STORE] Found ${all.length} enrollments in DB, but ALL were ignored because length (${all[0]?.embedding?.length}) != expected (${expectedLength}). Please re-enroll!`,
       );
     }
+    // ONE enrollment per device, enforced on read as well as on write. A build
+    // before this rule could have stored several; keeping only the most recent
+    // means those extras cannot still verify, which would defeat the whole
+    // point of the limit. Re-enrolling rewrites the list to a single entry.
+    if (filtered.length > 1) {
+      const newest = filtered.reduce((a, b) =>
+        b.createdAt > a.createdAt ? b : a,
+      );
+      console.warn(
+        `[OFFLINE_STORE] ${filtered.length} enrollments found; this device allows one. Using '${newest.userId}' (most recent). Reset the device to enrol someone else.`,
+      );
+      return [newest];
+    }
     return filtered;
+  }
+
+  /**
+   * The single identity this device is enrolled to, or null if unenrolled.
+   * A device belongs to ONE inspector — see saveEnrollment.
+   */
+  enrolledUserId(): string | null {
+    return this.listEnrollments()[0]?.userId ?? null;
   }
 
   saveEnrollment(
@@ -117,19 +138,33 @@ export class OfflineAuthStore {
     now = Date.now(),
     role?: string,
   ): void {
+    // ONE enrollment per device. Attendance is per-person, and a device holding
+    // several templates would verify whoever happened to match best — turning a
+    // shared phone into a way for one inspector to mark another present.
+    // Re-enrolling the SAME inspector is allowed (re-capture after a bad
+    // enrolment); enrolling anyone else requires an explicit device reset.
+    const existing = this.enrolledUserId();
+    if (existing !== null && existing !== userId) {
+      throw new Error(
+        `This device is already enrolled to ${existing}. Reset the device in Settings before enrolling a different inspector.`,
+      );
+    }
     const embedding = averageEmbeddings(samples);
     console.log(
       `[OFFLINE_STORE] saveEnrollment: userId='${userId}', averaged ${samples.length} samples into ${embedding.length}-dim vector.`,
     );
-    const next = this.listEnrollments().filter(e => e.userId !== userId);
-    next.push({
-      userId,
-      embedding: Array.from(embedding),
-      createdAt: now,
-      samples: samples.length,
-      ...(role ? {role} : {}),
-    });
-    writeJson(this.storage, ENROLLMENTS_KEY, next);
+    // Replace the list outright rather than appending — the device holds
+    // exactly one template, and this also collapses any legacy multi-enrollment
+    // data left by an older build.
+    writeJson(this.storage, ENROLLMENTS_KEY, [
+      {
+        userId,
+        embedding: Array.from(embedding),
+        createdAt: now,
+        samples: samples.length,
+        ...(role ? {role} : {}),
+      },
+    ]);
   }
 
   /** The most-recently enrolled identity on this device (for the welcome screen). */

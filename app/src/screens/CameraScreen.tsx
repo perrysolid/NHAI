@@ -74,7 +74,7 @@ import {
   setLang,
   type Lang,
 } from '../i18n';
-import {speak, setSpeechEnabled} from '../speech/tts';
+import {speak, setSpeechEnabled, stopSpeaking} from '../speech/tts';
 import {
   ActiveLivenessChallenge,
   evaluateDualLiveness,
@@ -529,10 +529,13 @@ export default function CameraScreen(): React.JSX.Element {
   }, [page, locationProvider, store]);
 
   useEffect(() => {
-    if (page === 'camera' && voice && gate.status) {
+    // Silent while a verify result is on screen: the gate keeps re-evaluating
+    // as the user relaxes and walks away, and without this guard it starts
+    // announcing "center your face" over the match confirmation.
+    if (page === 'camera' && voice && gate.status && !verifyResultTone) {
       speak(GATE_TEXT[gate.status]);
     }
-  }, [page, voice, gate.status]);
+  }, [page, voice, gate.status, verifyResultTone]);
 
   useEffect(() => {
     let cancelled = false;
@@ -790,6 +793,17 @@ export default function CameraScreen(): React.JSX.Element {
       });
       return;
     }
+    // ONE inspector per device. Stop here rather than at save time, so nobody
+    // walks through four capture steps only to be refused at the end.
+    const owner = store.enrolledUserId();
+    if (owner) {
+      setVerdict({
+        ok: false,
+        title: 'Device already enrolled',
+        detail: `Registered to ${owner}. Reset the device in Settings to enrol someone else.`,
+      });
+      return;
+    }
     setMode('enroll');
     setPage('enroll_id');
     setVerdict(null);
@@ -797,7 +811,7 @@ export default function CameraScreen(): React.JSX.Element {
     setEnrollComplete(false);
     enrollSamplesRef.current = [];
     enrollGestureRef.current = freshActionState();
-  }, [isOnline]);
+  }, [isOnline, store]);
 
   const openEnrollCamera = useCallback(() => {
     const id = userId.trim();
@@ -842,6 +856,10 @@ export default function CameraScreen(): React.JSX.Element {
       clearTimeout(verifyResultTimerRef.current);
       verifyResultTimerRef.current = null;
     }
+    // The verify is decided — stop talking. The last liveness prompt is usually
+    // still mid-utterance when the match lands, and the quality-gate guidance
+    // below would otherwise keep narrating over the result.
+    stopSpeaking();
     setVerifyResultTone(tone);
     if (tone === 'failure') {
       verifyResultTimerRef.current = setTimeout(() => {

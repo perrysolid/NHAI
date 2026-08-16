@@ -260,6 +260,51 @@ describe('per-action response deadline', () => {
     expect(c.update(open, 300).status).toBe('passed');
   });
 
+  it('blocks a SLOW looping video that the 30s window used to let through', () => {
+    // A looping recording cycling blink -> smile -> turnLeft -> turnRight will
+    // eventually present whatever is demanded. Under the old shared 30s window
+    // that was enough to pass. The per-action deadline means each gesture must
+    // reappear within 4-5s of being asked for, so a slow loop now runs out.
+    //
+    // HONEST LIMIT: this defeats slow loops, NOT tight ones. A loop that cycles
+    // all four gestures in under ~4s still passes at close to 100% (measured),
+    // because every gesture is then guaranteed to appear inside every deadline.
+    // Stopping that needs medium detection (passive PAD / moiré / flash), not a
+    // behavioural challenge — see CLAUDE.md §5.
+    const period = 20000;
+    const loopFrame = (t: number): Face => {
+      const seg = Math.floor(((t % period) / period) * 4);
+      const within = (((t % period) / period) * 4) % 1;
+      const eye = seg === 0 && within > 0.33 && within < 0.66 ? 0.05 : 0.95;
+      return face({
+        yawAngle: seg === 2 ? -30 : seg === 3 ? 30 : 0,
+        leftEyeOpenProbability: eye,
+        rightEyeOpenProbability: eye,
+        smilingProbability: seg === 1 ? 0.95 : 0,
+      });
+    };
+    let passed = 0;
+    const trials = 40;
+    for (let i = 0; i < trials; i++) {
+      const c = new ActiveLivenessChallenge();
+      c.start(0);
+      const offset = (i * 977) % period;
+      for (let t = 0; t < 40000; t += 160) {
+        const s = c.update(loopFrame(t + offset), t);
+        if (s.status === 'passed') {
+          passed++;
+          break;
+        }
+        if (s.status === 'failed') {
+          break;
+        }
+      }
+    }
+    // Measured ~4% for a 20s loop; assert well under a tenth to catch a
+    // regression that removes or badly loosens the per-action deadline.
+    expect(passed / trials).toBeLessThan(0.1);
+  });
+
   it('deadlines stay generous enough to cover a spoken prompt', () => {
     // Prompts are SPOKEN (speech/tts.ts at rate 0.5) and users wait for the
     // voice line before acting. Anything under ~2.5s here is a false-reject

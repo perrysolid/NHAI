@@ -182,10 +182,47 @@ because every defence here trades against false-rejecting real users in bad ligh
 |---|---|---|---|
 | 1 | **Printed photo** held to camera | Blink requires an eye-open swing ≥ `livenessMotionRange` (0.2); a flat reading cannot pass (`livenessActions.ts:83`) | ✅ Blocked |
 | 2 | **Static image on a screen** | Same as (1), plus randomized smile/turn | ✅ Blocked |
-| 3 | **Pre-recorded video** of the target | `ActiveLivenessChallenge` picks `livenessActionCount` (2) actions from a 4-action pool in a **random order per attempt**, gated step-by-step. A recording cannot satisfy a selection it did not anticipate | ✅ Blocked in practice (see caveat below) |
+| 3 | **Pre-recorded video** of the target | `ActiveLivenessChallenge` picks `livenessActionCount` (2) actions from a 4-action pool in a **random order per attempt**, gated step-by-step, each with its own deadline | ⚠️ **PARTIAL** — slow loops blocked, tight loops are not. See "the looping-video result" below |
 | 4 | **Screen/moiré texture** (any replay medium) | MiniFASNet passive score < `livenessPassiveFloor` (0.3) | ⚠️ **DISABLED** — `FLAGS.PASSIVE_SCREEN_BLOCK = false` |
 | 5 | **Live video call relay** — accomplice on a video call performs the challenge in real time | Per-action response deadline — a live human satisfies any behavioural challenge, but cannot escape the relay's round-trip latency | ⚠️ **PARTIAL** — deadlines land at 4–5 s pending on-device calibration; tighten toward ~2.5 s |
 | 6 | **Virtual-camera / frame injection** — feed synthetic video into the camera stream, bypassing the lens | *Nothing* — no capture-provenance or device-integrity check exists | ❌ **NOT BLOCKED** |
+
+### The looping-video result (measured, not assumed)
+
+A recording that cycles all four gestures and is simply replayed on a loop was
+simulated against the real `ActiveLivenessChallenge` (400 trials per period,
+random loop phase, sampled at `challengeTickMs`):
+
+| Loop period | Pass rate |
+|---|---|
+| 1.5 s | **100%** |
+| 2.5 s | **100%** |
+| 4 s | **95%** |
+| 6 s | 52% |
+| 10 s | 14% |
+| 20 s | 4% |
+
+Read that carefully, because it is the opposite of the intuition. Randomizing
+*which* actions and *what order* does **not** stop a loop that contains every
+gesture — the loop will present whatever is demanded soon enough. What decides
+the outcome is the per-action deadline versus the loop period: if the loop cycles
+faster than the deadline, every demanded gesture is guaranteed to appear inside
+its window, so the attack succeeds essentially always.
+
+So the deadline blocks **slow and naive** loops (a 20 s loop drops from near-certain
+success under the old shared 30 s window to 4%) and does nothing against a
+**deliberately tight** one. Tightening the deadline toward 2.5 s narrows the band
+of loop periods that fail — it does not close the attack, it only forces the
+attacker to build a shorter loop, which is easy.
+
+**The behavioural challenge cannot solve this.** A loop shorter than the deadline
+beats it by construction, exactly as a live relay does. What actually stops both
+is detecting the *display medium* rather than the behaviour: passive PAD, moiré/DFT,
+or flash reflection. All are currently off or unimplemented. Do not describe
+pre-recorded video as blocked without this caveat.
+
+Regression-tested in `liveness.test.ts` ("blocks a SLOW looping video…"), which
+pins the slow-loop case so removing the deadline is caught.
 
 ### Why (4) is off, and what it costs
 
@@ -236,10 +273,29 @@ to delete the defence.
 **The behavioural ceiling.** Any challenge a human can perform on command, a
 human on a video call can also perform on command — and current real-time
 deepfake engines take blink/smile/turn as parameters. This is a *category limit*,
-not a threshold to tune. Adding entropy (more actions, randomized **counts** like
-"blink twice") raises the bar against pre-recorded and spliced clips, which are
-already blocked, and does nothing against 5 or 6 while costing real BPCER. Do it
-as cheap hardening, never as the answer.
+not a threshold to tune.
+
+**Randomized counts ("smile twice") do not help. Measured, not assumed.** The
+intuition is that a loop cannot repeat on demand. It can. Requiring N repetitions
+forces the deadline UP, because a real user needs `prompt overhead + N × ~1 s`
+to comply — and the loop spends that same extra time cycling. Pass rate for a
+looping video, deadline scaled to keep genuine users passing:
+
+| N | deadline | 1 s loop | 2 s loop | 3 s loop | 4 s loop |
+|---|---|---|---|---|---|
+| 1 | 3.5 s | 100% | 100% | 100% | 100% |
+| 2 | 4.5 s | 100% | 100% | 79% | 40% |
+| 3 | 5.5 s | 100% | 98% | 6% | 0% |
+| 4 | 6.5 s | 100% | 50% | 0% | 0% |
+
+Counting only bites when the loop is *slow*, and the attacker picks the speed.
+The floor is set by detection, not by counting: a blink still registers reliably
+at a **1 s** loop period (100% within 5 s; it only degrades below ~800 ms, where
+the closed phase falls between samples). Against a 1 s loop, every count from 1
+to 4 passes 100% of the time — while costing a real inspector a 6.5 s challenge.
+
+So counts buy nothing against the attack they look designed to stop, and cost
+real BPCER. Skip them.
 
 To beat a relay you must stop challenging *the person's behaviour* and start
 challenging *the physics of the capture*. In effort/return order:

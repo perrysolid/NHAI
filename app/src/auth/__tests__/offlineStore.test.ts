@@ -34,6 +34,81 @@ describe('offline queue is bounded', () => {
   });
 });
 
+/**
+ * One inspector per device. Attendance is per-person, so a device holding
+ * several templates would verify whoever matched best — turning a shared phone
+ * into a way for one inspector to mark another present.
+ */
+describe('single enrollment per device', () => {
+  const len = RECOGNITION_MODELS[ACTIVE_RECOGNITION].embeddingLength;
+  const sampleFor = (seed: number) => {
+    const v = new Float32Array(len);
+    v[seed % len] = 1;
+    return v;
+  };
+
+  it('reports no owner on a fresh device', () => {
+    const store = new OfflineAuthStore(createMemoryStorage());
+    expect(store.enrolledUserId()).toBeNull();
+  });
+
+  it('refuses a second, different inspector', () => {
+    const store = new OfflineAuthStore(createMemoryStorage());
+    store.saveEnrollment('inspector_a', [sampleFor(1)]);
+    expect(() => store.saveEnrollment('inspector_b', [sampleFor(2)])).toThrow(
+      /already enrolled to inspector_a/,
+    );
+    expect(store.listEnrollments()).toHaveLength(1);
+    expect(store.enrolledUserId()).toBe('inspector_a');
+  });
+
+  it('allows the same inspector to re-enrol, replacing the template', () => {
+    // Re-capturing after a poor enrolment must stay possible.
+    const store = new OfflineAuthStore(createMemoryStorage());
+    store.saveEnrollment('inspector_a', [sampleFor(1)], 100);
+    store.saveEnrollment('inspector_a', [sampleFor(2)], 200);
+    const all = store.listEnrollments();
+    expect(all).toHaveLength(1);
+    expect(all[0].createdAt).toBe(200);
+  });
+
+  it('frees the device after a reset', () => {
+    const store = new OfflineAuthStore(createMemoryStorage());
+    store.saveEnrollment('inspector_a', [sampleFor(1)]);
+    store.clearAll();
+    expect(store.enrolledUserId()).toBeNull();
+    expect(() =>
+      store.saveEnrollment('inspector_b', [sampleFor(2)]),
+    ).not.toThrow();
+  });
+
+  it('collapses legacy multi-enrollment data to the most recent', () => {
+    // A build before this rule could have stored several templates. Leaving
+    // them readable would let the extra identities still verify.
+    const storage = createMemoryStorage();
+    storage.set(
+      'dfa.enrollments.v1',
+      JSON.stringify([
+        {
+          userId: 'old_a',
+          embedding: Array.from(sampleFor(1)),
+          createdAt: 100,
+          samples: 1,
+        },
+        {
+          userId: 'old_b',
+          embedding: Array.from(sampleFor(2)),
+          createdAt: 200,
+          samples: 1,
+        },
+      ]),
+    );
+    const store = new OfflineAuthStore(storage);
+    expect(store.listEnrollments()).toHaveLength(1);
+    expect(store.enrolledUserId()).toBe('old_b');
+  });
+});
+
 describe('OfflineAuthStore', () => {
   it('enrolls, verifies, queues, and purges records', () => {
     const store = new OfflineAuthStore(createMemoryStorage());
