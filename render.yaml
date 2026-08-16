@@ -17,6 +17,9 @@ services:
         generateValue: true # shared secret; mirror into the frontend's VITE_SYNC_KEY
       - key: ADMIN_PASSCODE
         generateValue: true # /admin?key=... (server-rendered ops console)
+      # REQUIRED — the service refuses to start without these. Render prompts
+      # for `sync: false` vars at blueprint deploy time; fill them in there, or
+      # the instance will exit with a message naming what is missing.
       - key: ADMIN_USER
         sync: false # admin dashboard login username
       - key: ADMIN_PASSWORD

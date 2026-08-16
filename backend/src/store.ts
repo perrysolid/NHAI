@@ -151,6 +151,26 @@ export function sanitizeMany(input: unknown): AttendanceRecord[] {
 /** Maximum attendance records a single device may submit per rolling minute. */
 const RATE_LIMIT_PER_DEVICE = 30;
 
+/**
+ * Thrown when a device is over its submission budget. Signals BACKPRESSURE, not
+ * invalid data — the caller must answer 429 so the device retries later.
+ *
+ * WHY THIS IS AN ERROR AND NOT A FILTER. Being over the rate limit used to drop
+ * the offending records inside guard(). Because the device only purges records
+ * the server ACKNOWLEDGES, every dropped record stayed in the local queue and
+ * was resubmitted forever — and since the count comes from rows already
+ * persisted in the last 60s, any device returning from an outage with a backlog
+ * tripped it immediately. That silently and permanently destroyed genuine
+ * attendance data in precisely the offline-first scenario this system exists
+ * for. Rate limiting is a transport concern: refuse the REQUEST, keep the data.
+ */
+export class RateLimitExceededError extends Error {
+  constructor(public readonly deviceId: string) {
+    super(`device ${deviceId} exceeded ${RATE_LIMIT_PER_DEVICE} records/min`);
+    this.name = 'RateLimitExceededError';
+  }
+}
+
 /** Score sanity bounds — anything outside is definitively tampered. */
 function scoreSanity(r: AttendanceRecord): boolean {
   if (r.matchDistance < 0 || r.matchDistance > 1) return false;
@@ -158,6 +178,79 @@ function scoreSanity(r: AttendanceRecord): boolean {
   if (r.score !== undefined && (r.score < 0 || r.score > 100)) return false;
   if (r.latencyMs !== undefined && r.latencyMs < 0) return false;
   return true;
+}
+
+/**
+ * Submission counter keyed on SERVER RECEIPT TIME.
+ *
+ * The window used to be derived from each record's `ts` field — a value the
+ * device supplies. Backdating the timestamps therefore skipped the limiter
+ * completely (verified: 35 records with 1970-era timestamps sailed through
+ * while 35 with current ones were correctly refused at 31), and keeping the
+ * timestamps increasing still satisfied the monotonic check. A limiter an
+ * attacker can switch off is worse than none, because it reads as protection.
+ *
+ * Owned by each Store instance rather than kept module-global: the budget is
+ * part of a store's state, so two stores (a test's and the app's, or two in one
+ * process) must not silently share or leak one counter.
+ *
+ * Deliberately in-process, so it is per-instance and resets on restart. That is
+ * an honest backstop, not the real control: distributed enforcement belongs at
+ * the edge, keyed by deviceId (CLAUDE.md §8).
+ */
+class DeviceRateTracker {
+  private hits = new Map<string, number[]>();
+
+  count(deviceId: string, now: number): number {
+    const cutoff = now - 60_000;
+    const recent = (this.hits.get(deviceId) ?? []).filter(t => t > cutoff);
+    if (recent.length > 0) {
+      this.hits.set(deviceId, recent);
+    } else {
+      this.hits.delete(deviceId); // keep the map from growing with dead devices
+    }
+    return recent.length;
+  }
+
+  add(deviceId: string, now: number, n: number): void {
+    const recent = this.hits.get(deviceId) ?? [];
+    for (let i = 0; i < n; i++) {
+      recent.push(now);
+    }
+    this.hits.set(deviceId, recent);
+  }
+}
+
+/**
+ * Reject the whole REQUEST when a device is over its per-minute budget, so the
+ * device can retry with its data intact. See RateLimitExceededError for why
+ * this must not be a per-record filter.
+ */
+function assertWithinRate(
+  tracker: DeviceRateTracker,
+  records: AttendanceRecord[],
+  now = Date.now(),
+): void {
+  for (const deviceId of new Set(records.map(r => r.deviceId))) {
+    if (tracker.count(deviceId, now) >= RATE_LIMIT_PER_DEVICE) {
+      throw new RateLimitExceededError(deviceId);
+    }
+  }
+}
+
+/** Charge admitted records against the submitting device's budget. */
+function chargeRate(
+  tracker: DeviceRateTracker,
+  records: AttendanceRecord[],
+  now = Date.now(),
+): void {
+  const perDevice = new Map<string, number>();
+  for (const r of records) {
+    perDevice.set(r.deviceId, (perDevice.get(r.deviceId) ?? 0) + 1);
+  }
+  for (const [deviceId, n] of perDevice) {
+    tracker.add(deviceId, now, n);
+  }
 }
 
 /** Build a map of {userId → {deviceId, maxTimestamp}} from a record set. */
@@ -180,38 +273,37 @@ function deviceMaxTs(
 // ── In-memory ──
 class MemoryStore implements Store {
   kind = 'memory' as const;
+  private rate = new DeviceRateTracker();
   private seen = new Set<string>();
   private rows: AttendanceRecord[] = [];
 
   async init(): Promise<void> {}
 
   async add(records: AttendanceRecord[]): Promise<AttendanceRecord[]> {
-    const accepted: AttendanceRecord[] = [];
     for (const r of records) {
       const k = keyOf(r);
       if (!this.seen.has(k)) {
         this.seen.add(k);
         this.rows.push(r);
-        accepted.push(r);
       }
     }
-    return accepted;
+    // Acknowledge every record that is now durably stored, INCLUDING ones that
+    // were already present. The device purges only what the server
+    // acknowledges, so withholding the ack for a duplicate left it queued for
+    // good after any lost response.
+    return records;
   }
 
   async guard(records: AttendanceRecord[]): Promise<AttendanceRecord[]> {
-    const now = Date.now();
-    // Index existing data: max timestamp per (userId, deviceId), rate
-    // counts per deviceId, and known deviceId sets per userId.
+    // Index existing data: max timestamp per (userId, deviceId) and the known
+    // deviceId set per userId. Submission rate is tracked separately, on the
+    // server clock (see DeviceRateTracker).
     const lastTs = new Map<string, number>();
-    const devCount = new Map<string, number>();
     const userIdDevices = new Map<string, Set<string>>();
     for (const row of this.rows) {
       const pair = `${row.userId}|${row.deviceId}`;
       const prev = lastTs.get(pair) ?? 0;
       if (row.timestamp > prev) lastTs.set(pair, row.timestamp);
-      if (row.timestamp > now - 60_000) {
-        devCount.set(row.deviceId, (devCount.get(row.deviceId) ?? 0) + 1);
-      }
       let devices = userIdDevices.get(row.userId);
       if (!devices) {
         devices = new Set();
@@ -219,15 +311,20 @@ class MemoryStore implements Store {
       }
       devices.add(row.deviceId);
     }
-    return records.filter(r => {
+    assertWithinRate(this.rate, records);
+    const kept = records.filter(r => {
       if (!scoreSanity(r)) return false;
       // Monotonic timestamp: reject if a newer record exists for this pair.
       const pair = `${r.userId}|${r.deviceId}`;
       const max = lastTs.get(pair);
-      if (max !== undefined && r.timestamp <= max) return false;
+      // STRICTLY older is a replay; EQUAL is the same record arriving twice,
+      // which is a lost acknowledgement, not an attack. Rejecting equality
+      // wedged the device forever: the ack never reached it, so it resubmitted
+      // a record the server now refused, and it could never purge what the
+      // server would not acknowledge. The (userId, ts, deviceId) primary key
+      // makes re-sends idempotent, so let them through and re-acknowledge.
+      if (max !== undefined && r.timestamp < max) return false;
       // Rate limit per device in rolling 60s window.
-      const cnt = devCount.get(r.deviceId) ?? 0;
-      if (cnt >= RATE_LIMIT_PER_DEVICE) return false;
       // Cross-device timeline check: if another device was active for this
       // userId AFTER this record's timestamp, reject (likely injection).
       const knownDevices = userIdDevices.get(r.userId);
@@ -241,6 +338,8 @@ class MemoryStore implements Store {
       }
       return true;
     });
+    chargeRate(this.rate, kept);
+    return kept;
   }
 
   async list(limit: number, since = 0): Promise<AttendanceRecord[]> {
@@ -254,6 +353,7 @@ class MemoryStore implements Store {
 // ── Postgres ──
 class PostgresStore implements Store {
   kind = 'postgres' as const;
+  private rate = new DeviceRateTracker();
   private pool: Pool;
 
   constructor(connectionString: string) {
@@ -297,9 +397,8 @@ class PostgresStore implements Store {
   }
 
   async add(records: AttendanceRecord[]): Promise<AttendanceRecord[]> {
-    const accepted: AttendanceRecord[] = [];
     for (const r of records) {
-      const res = await this.pool.query(
+      await this.pool.query(
         `INSERT INTO attendance (user_id, ts, device_id, liveness_passed, match_distance, confidence, score, latency_ms, metrics, location)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
          ON CONFLICT (user_id, ts, device_id) DO NOTHING`,
@@ -316,17 +415,15 @@ class PostgresStore implements Store {
           r.location ? JSON.stringify(r.location) : null,
         ],
       );
-      if ((res.rowCount ?? 0) > 0) {
-        accepted.push(r);
-      }
     }
-    return accepted;
+    // Every record is now stored (inserted, or already present via ON CONFLICT
+    // DO NOTHING). Acknowledge them all so a re-send after a lost response can
+    // finally be purged from the device queue.
+    return records;
   }
 
   async guard(records: AttendanceRecord[]): Promise<AttendanceRecord[]> {
-    const now = Date.now();
     const userIds = [...new Set(records.map(r => r.userId))];
-    const deviceIds = [...new Set(records.map(r => r.deviceId))];
     // Fetch last timestamp per (userId, deviceId).
     const {rows: lastRows} = await this.pool.query(
       `SELECT user_id, device_id, MAX(ts) as last_ts
@@ -338,18 +435,6 @@ class PostgresStore implements Store {
     const lastTs = new Map<string, number>();
     for (const row of lastRows) {
       lastTs.set(`${row.user_id}|${row.device_id}`, Number(row.last_ts));
-    }
-    // Fetch rate counts per device in the last 60s.
-    const {rows: countRows} = await this.pool.query(
-      `SELECT device_id, COUNT(*) as cnt
-         FROM attendance
-        WHERE device_id = ANY($1::text[]) AND ts > $2
-        GROUP BY device_id`,
-      [deviceIds, now - 60_000],
-    );
-    const devCount = new Map<string, number>();
-    for (const row of countRows) {
-      devCount.set(row.device_id, Number(row.cnt));
     }
     // Fetch cross-device scope.
     const {rows: devRows} = await this.pool.query(
@@ -363,13 +448,18 @@ class PostgresStore implements Store {
     for (const row of devRows) {
       userIdDevices.set(row.user_id, new Set(row.devices));
     }
-    return records.filter(r => {
+    assertWithinRate(this.rate, records);
+    const kept = records.filter(r => {
       if (!scoreSanity(r)) return false;
       const pair = `${r.userId}|${r.deviceId}`;
       const max = lastTs.get(pair);
-      if (max !== undefined && r.timestamp <= max) return false;
-      const cnt = devCount.get(r.deviceId) ?? 0;
-      if (cnt >= RATE_LIMIT_PER_DEVICE) return false;
+      // STRICTLY older is a replay; EQUAL is the same record arriving twice,
+      // which is a lost acknowledgement, not an attack. Rejecting equality
+      // wedged the device forever: the ack never reached it, so it resubmitted
+      // a record the server now refused, and it could never purge what the
+      // server would not acknowledge. The (userId, ts, deviceId) primary key
+      // makes re-sends idempotent, so let them through and re-acknowledge.
+      if (max !== undefined && r.timestamp < max) return false;
       const knownDevices = userIdDevices.get(r.userId);
       if (knownDevices) {
         for (const otherDev of knownDevices) {
@@ -381,6 +471,8 @@ class PostgresStore implements Store {
       }
       return true;
     });
+    chargeRate(this.rate, kept);
+    return kept;
   }
 
   async list(limit: number, since = 0): Promise<AttendanceRecord[]> {
@@ -416,6 +508,7 @@ class PostgresStore implements Store {
 // Table `attendance` (see docs/SUPABASE.md). Dedupes on (user_id, ts, device_id).
 class SupabaseStore implements Store {
   kind = 'postgres' as const;
+  private rate = new DeviceRateTracker();
   private get db() {
     const c = getSupabase();
     if (!c) {
@@ -462,23 +555,23 @@ class SupabaseStore implements Store {
     };
   }
   async add(records: AttendanceRecord[]): Promise<AttendanceRecord[]> {
-    const {data, error} = await this.db
+    const {error} = await this.db
       .from('attendance')
       .upsert(records.map(r => this.toRow(r)), {
         onConflict: 'user_id,ts,device_id',
         ignoreDuplicates: true,
-      })
-      .select();
+      });
     if (error) {
       throw new Error(error.message);
     }
-    return (data ?? []).map(r => this.fromRow(r));
+    // Upsert guarantees presence, so acknowledge the full set rather than only
+    // the rows this call happened to insert — otherwise a duplicate arriving
+    // after a lost response could never be purged from the device queue.
+    return records;
   }
 
   async guard(records: AttendanceRecord[]): Promise<AttendanceRecord[]> {
-    const now = Date.now();
     const userIds = [...new Set(records.map(r => r.userId))];
-    const deviceIds = [...new Set(records.map(r => r.deviceId))];
     // Fetch last timestamp per (userId, deviceId). Supabase doesn't expose
     // GROUP BY in the JS client, so we fetch all records for these users and
     // aggregate in JS. This is acceptable at hackathon scale; for production
@@ -497,18 +590,6 @@ class SupabaseStore implements Store {
         }
       }
     }
-    // Fetch rate counts per device in the last 60s.
-    const devCount = new Map<string, number>();
-    for (const did of deviceIds) {
-      const {count, error} = await this.db
-        .from('attendance')
-        .select('*', {count: 'exact', head: true})
-        .eq('device_id', did)
-        .gte('ts', now - 60_000);
-      if (!error && typeof count === 'number') {
-        devCount.set(did, count);
-      }
-    }
     // Fetch cross-device scope per user.
     const userIdDevices = new Map<string, Set<string>>();
     for (const uid of userIds) {
@@ -520,13 +601,18 @@ class SupabaseStore implements Store {
         userIdDevices.set(uid, new Set(data.map(d => d.device_id)));
       }
     }
-    return records.filter(r => {
+    assertWithinRate(this.rate, records);
+    const kept = records.filter(r => {
       if (!scoreSanity(r)) return false;
       const pair = `${r.userId}|${r.deviceId}`;
       const max = lastMap.get(pair);
-      if (max !== undefined && r.timestamp <= max) return false;
-      const cnt = devCount.get(r.deviceId) ?? 0;
-      if (cnt >= RATE_LIMIT_PER_DEVICE) return false;
+      // STRICTLY older is a replay; EQUAL is the same record arriving twice,
+      // which is a lost acknowledgement, not an attack. Rejecting equality
+      // wedged the device forever: the ack never reached it, so it resubmitted
+      // a record the server now refused, and it could never purge what the
+      // server would not acknowledge. The (userId, ts, deviceId) primary key
+      // makes re-sends idempotent, so let them through and re-acknowledge.
+      if (max !== undefined && r.timestamp < max) return false;
       const knownDevices = userIdDevices.get(r.userId);
       if (knownDevices) {
         for (const otherDev of knownDevices) {
@@ -538,6 +624,8 @@ class SupabaseStore implements Store {
       }
       return true;
     });
+    chargeRate(this.rate, kept);
+    return kept;
   }
 
   async list(limit: number, since = 0): Promise<AttendanceRecord[]> {
