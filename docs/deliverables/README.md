@@ -3,7 +3,7 @@
 This folder contains the installable Android build for hackathon judges plus the iOS packaging notes.
 
 Direct APK:
-https://github.com/perrysolid/NHAI/raw/feature/edgeface-s-int8-recognition/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
+https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
 
 ## Android APKs
 
@@ -15,20 +15,40 @@ adb install -r docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
 
 | File | Target device | Size | SHA-256 |
 |------|---------------|------|---------|
-| `DatalakeFaceAuth-android-universal-release.apk` | One APK for all Android phones: arm64-v8a + armeabi-v7a | 67 MB | `daa2769a850ee59bf12e0a2fc8010074706410cfabaf9a63ac9eb703d1f41a4f` |
-| `DatalakeFaceAuth-android-arm64-v8a-release.apk` | Modern 64-bit Android phones (recommended) | 47 MB | `72c0f9563aaa8de53443f19d7beba3feec026bec42ef80d9a28fdc1a03d5b1a2` |
-| `DatalakeFaceAuth-android-armeabi-v7a-release.apk` | Older 32-bit Android phones | 37 MB | `7a28e6652b7dff5bee07e6642961470ffcd7e58b58a940c80199b06ba6754562` |
+| `DatalakeFaceAuth-android-universal-release.apk` | One APK for all Android phones: arm64-v8a + armeabi-v7a | 82 MB | `daaab83bd37c6ffe81f4541b72127a9bff92053ab39d7be8753f1d42fb1f922e` |
+| `DatalakeFaceAuth-android-arm64-v8a-release.apk` | Modern 64-bit Android phones (recommended) | 63 MB | `b4cd957c0856874226d8e874a67727ee4c478f8c5a4f0fa7918727faa84064a1` |
+| `DatalakeFaceAuth-android-armeabi-v7a-release.apk` | Older 32-bit Android phones | 53 MB | `6c5825feda255619c7a68272829e0fa02867760516dd3cbc9bf1411561d3df51` |
 
 Package details:
 
 - App id: `com.datalakefaceauth`
-- Version: `3.0` (versionCode 22)
-- Branch: `feature/edgeface-s-int8-recognition`
+- Version: `4.2` (versionCode 35)
+- Branch: `main`
 - Recognition model: **EdgeFace-S Float32** (14 MB, 512-dim ArcFace — full precision)
 - Threshold: `0.65` cosine similarity (genuine ~0.90–0.98, impostor ~0.20–0.50)
 - Android minimum: API 26 / Android 8.0+
 - Auth path: verification is fully offline — liveness, recognition, matching, and queueing need no network. Enrollment is an online registration (template + role sent to the backend); attendance syncs when back online.
-- Bundled model assets: `edgeface_s.tflite` (14 MB Float32) + `minifasnet.tflite` (5.7 MB)
+- Bundled model assets: `edgeface_s.tflite` (14.2 MB Float32) + `minifasnet.tflite` (5.7 MB)
+
+## What is in this build
+
+- **One enrollment per device.** A phone belongs to a single inspector; enrolling
+  anyone else requires Settings -> Reset device. Several templates on one phone
+  would verify whoever matched best, which is a way to mark a colleague present.
+- **Per-action liveness deadline.** Each blink/smile/turn must be completed within
+  its own window (4s blink/smile, 5s turns) measured from the moment it is asked
+  for, rather than sharing one 30s budget. This is the anti-relay control.
+- **Voice stops once a verify resolves** instead of narrating over the result.
+- **Offline queue fixes.** Failed verifies no longer produce records the backend
+  refuses forever, and the queue is bounded.
+
+### Honest scope of the anti-spoof
+
+Blocks printed photos, static images on a screen, and slow or naive replays.
+**Passive screen detection (MiniFASNet) is bundled but not enforced** — it is
+pending on-device calibration, so a tight looping video, a live video-call relay,
+and virtual-camera injection are **not** blocked in this build. See CLAUDE.md §5
+for the measurements behind that statement.
 
 
 ## iOS
