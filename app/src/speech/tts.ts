@@ -71,6 +71,24 @@ export function isSpeechEnabled(): boolean {
   return enabled;
 }
 
+/**
+ * Cut off whatever is currently being spoken, without disabling speech.
+ *
+ * Used the moment a verify resolves: the last liveness prompt is often still
+ * mid-utterance when the match lands, and the gate guidance would otherwise
+ * carry on narrating over the result. Clears the dedup window too, so the next
+ * genuine prompt is not swallowed as a repeat.
+ */
+export function stopSpeaking(): void {
+  lastText = '';
+  lastTime = 0;
+  try {
+    Tts.stop();
+  } catch {
+    /* engine unavailable; nothing to stop */
+  }
+}
+
 /** Speak a prompt in the selected language (default Hindi). */
 export function speak(pair: SpeechPair): void {
   if (!enabled || !pair) {
