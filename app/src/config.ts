@@ -125,14 +125,28 @@ export interface LivenessSpec {
   channelOrder: 'rgb' | 'bgr';
 }
 
-// MiniFASNetV2-SE (Silent-Face-Anti-Spoofing, Apache-2.0).
+// MiniFASNetV2 (Silent-Face-Anti-Spoofing, Apache-2.0). NOT the "-SE" variant:
+// the bundled flatbuffer contains zero squeeze-excitation blocks. Layer names in
+// the file trace its provenance to DeepFace's vendored FasNet backbone, which is
+// a verbatim copy of Minivision's Silent-Face.
+//
 // Input 80x80x3, 3-class softmax, index 1 = live.
+//
+// SCALING — the reason passive PAD was scoring real faces below the floor.
+// Silent-Face's `ToTensor` is NOT torchvision's; it is their own vendored copy
+// where the `.div(255)` line is COMMENTED OUT ("modify by zkx"), so the network
+// was trained on raw 0..255 input. Its docstring still claims [0,1] and is
+// simply wrong. DeepFace copied it faithfully, and our TFLite came from there.
+// preprocessRgb computes `px/255/std - mean/std`, so std = 1/255 yields raw
+// pixel values — feeding 0..1 made every activation 255x too small.
+// Verify on-device before trusting: score a real face and a phone-screen replay
+// and confirm the distributions actually separate.
 export const LIVENESS_MODEL: LivenessSpec = {
   assetName: 'minifasnet.tflite',
   inputSize: 80,
   channels: 3,
   mean: [0, 0, 0],
-  std: [1, 1, 1],
+  std: [1 / 255, 1 / 255, 1 / 255],
   bboxExpansion: 2.7,
   liveClassIndex: 1,
   dtype: 'float32',

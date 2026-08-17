@@ -220,7 +220,6 @@ export default function CameraScreen(): React.JSX.Element {
   // On-device geofence zone summary shown in the settings sheet, plus a busy
   // flag while the "pin geofence here" action waits for a GPS fix.
   const [siteSummary, setSiteSummary] = useState('No site configured');
-  const [pinning, setPinning] = useState(false);
   const [geoStatus, setGeoStatus] = useState<{
     reason: string;
     siteName?: string;
@@ -1303,11 +1302,15 @@ export default function CameraScreen(): React.JSX.Element {
       setVerdict({
         ok: true,
         title: composite.lowTrust ? 'Matched · review' : 'Matched offline',
+        // Passive score is shown on SUCCESS as well as failure. It is advisory
+        // (PASSIVE_SCREEN_BLOCK is off), but it is the number needed to
+        // calibrate MiniFASNet — and it was previously only visible when a
+        // verify failed, i.e. never for the real-face samples you need most.
         detail: `${verify.userId} · match ${(verify.matchScore * 100).toFixed(
           0,
-        )}% · score ${composite.overall}/100${
-          location ? ` · ${geofenceReasonText(geo)}` : ''
-        }`,
+        )}% · score ${composite.overall}/100 · passive ${(
+          passiveScore * 100
+        ).toFixed(0)}%${location ? ` · ${geofenceReasonText(geo)}` : ''}`,
         score: composite.overall,
         latencyMs,
       });
@@ -1543,47 +1546,6 @@ export default function CameraScreen(): React.JSX.Element {
     }
   }, [profileOpen, store, userId]);
 
-  // "Pin geofence to my location" — capture the current GPS fix and save it as a
-  // circular site on-device. Works with zero admin/backend/userId dependency, so
-  // the geofence is guaranteed to be centred exactly where the phone is standing.
-  const onPinGeofence = useCallback(async () => {
-    setPinning(true);
-    try {
-      const fix = await locationProvider.getFix({
-        timeoutMs: GEOFENCE.fixTimeoutMs,
-        maxAgeMs: GEOFENCE.maxFixAgeMs,
-      });
-      if (!fix) {
-        Alert.alert(
-          'No GPS fix',
-          'Could not get a location. GPS needs open sky — go near a window or step outside, then try again.',
-        );
-        return;
-      }
-      const site: Site = {
-        id: 'device-pin',
-        name: 'Pinned location',
-        shape: {
-          kind: 'circle',
-          center: {lat: fix.lat, lon: fix.lon},
-          radiusM: GEOFENCE.pinRadiusM,
-        },
-      };
-      store.saveSites([site]);
-      latestFixRef.current = fix;
-      setSiteSummary(summarizeSites([site]));
-      Alert.alert(
-        'Geofence pinned here',
-        `Centred on this spot (GPS ±${Math.round(fix.accuracyM)} m) with a ${
-          GEOFENCE.pinRadiusM
-        } m radius. Verify now checks against ` +
-          'this location — fully offline.',
-      );
-    } finally {
-      setPinning(false);
-    }
-  }, [locationProvider, store]);
-
   if (page === 'home') {
     return (
       <>
@@ -1610,8 +1572,6 @@ export default function CameraScreen(): React.JSX.Element {
           onReset={onClearLocal}
           onClose={() => setProfileOpen(false)}
           geofenceLabel={siteSummary}
-          pinning={pinning}
-          onPinGeofence={onPinGeofence}
           onShowCalibration={
             calibration
               ? () => {
@@ -1929,13 +1889,6 @@ export default function CameraScreen(): React.JSX.Element {
             turn your head, in a random order, then matching runs against the
             templates saved on this phone.
           </Text>
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            onPress={openEnrollSetup}>
-            <Text style={styles.secondaryButtonText}>
-              Enroll another inspector
-            </Text>
-          </TouchableOpacity>
         </View>
 
         {verdict && (
@@ -2033,11 +1986,15 @@ function HomePage({
         <TouchableOpacity style={styles.primaryButton} onPress={onVerify}>
           <Text style={styles.primaryButtonText}>Verify</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.secondaryButton} onPress={onEnroll}>
-          <Text style={styles.secondaryButtonText}>
-            {identity ? 'Enroll another inspector' : 'Enroll'}
-          </Text>
-        </TouchableOpacity>
+        {/* Enrol is offered only on an unclaimed device. One phone belongs to
+            one inspector, so once it is registered there is nothing to enrol —
+            showing a button that always refuses just invites the question.
+            Settings -> Reset device is how a phone changes hands. */}
+        {!identity && (
+          <TouchableOpacity style={styles.secondaryButton} onPress={onEnroll}>
+            <Text style={styles.secondaryButtonText}>Enroll</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.homeStats}>
@@ -2082,8 +2039,6 @@ function ProfilePanel({
   onReset,
   onClose,
   geofenceLabel,
-  pinning,
-  onPinGeofence,
   onShowCalibration,
 }: {
   visible: boolean;
@@ -2097,8 +2052,6 @@ function ProfilePanel({
   onReset: () => void;
   onClose: () => void;
   geofenceLabel: string;
-  pinning: boolean;
-  onPinGeofence: () => void;
   /** Present only while FLAGS.CALIBRATE_LIVENESS is on. */
   onShowCalibration?: () => void;
 }): React.JSX.Element {
@@ -2157,15 +2110,6 @@ function ProfilePanel({
             value={geofenceLabel}
             active={geofenceLabel !== 'No site configured'}
           />
-          <TouchableOpacity
-            style={[styles.secondaryButton, pinning && styles.disabledButton]}
-            onPress={onPinGeofence}
-            disabled={pinning}>
-            <Text style={styles.secondaryButtonText}>
-              {pinning ? 'Getting GPS fix…' : 'Pin geofence to my location'}
-            </Text>
-          </TouchableOpacity>
-
           {onShowCalibration && (
             <>
               <Text style={styles.sheetSection}>CALIBRATION</Text>
