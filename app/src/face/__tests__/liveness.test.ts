@@ -283,10 +283,20 @@ describe('per-action response deadline', () => {
         smilingProbability: seg === 1 ? 0.95 : 0,
       });
     };
+    // Seeded RNG so the action draw is deterministic. With Math.random this
+    // assertion was genuinely flaky: the pass rate is ~4%, and over 40 trials
+    // ordinary variance crossed a 10% threshold often enough to fail in a full
+    // suite run while passing in isolation. A probabilistic security assertion
+    // needs a fixed seed, not a looser bound.
+    let seed = 0x2f6e2b1;
+    const rng = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
     let passed = 0;
     const trials = 40;
     for (let i = 0; i < trials; i++) {
-      const c = new ActiveLivenessChallenge();
+      const c = new ActiveLivenessChallenge(rng);
       c.start(0);
       const offset = (i * 977) % period;
       for (let t = 0; t < 40000; t += 160) {

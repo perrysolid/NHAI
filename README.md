@@ -8,7 +8,7 @@
 ![Android](https://img.shields.io/badge/Android_8.0+-3ddc84?style=for-the-badge&logo=android&logoColor=white)
 ![iOS](https://img.shields.io/badge/iOS_15.5+-000000?style=for-the-badge&logo=apple)
 ![Offline](https://img.shields.io/badge/Auth-100%25_offline-38e0a5?style=for-the-badge)
-![Models](https://img.shields.io/badge/Models-~10.7_MB-38e0a5?style=for-the-badge)
+![Models](https://img.shields.io/badge/Models-19.9_MB-38e0a5?style=for-the-badge)
 
 ### &nbsp;[▶ Live demo](https://nhai-three.vercel.app)&nbsp; · &nbsp;[⬇ Download APK](https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk)&nbsp; · &nbsp;[Demo video](https://drive.google.com/drive/folders/14rTxUjJ_Wrdt349yWkksgE51m87zO97d?usp=sharing)&nbsp;
 
@@ -95,10 +95,10 @@ Weights live in `config.ts` (`SCORING`) and are identical on native and web (`ap
 | # | Requirement | Status | Where |
 |---|-------------|--------|-------|
 | 1 | React Native, Android **and** iOS | Met (Android release APK builds; iOS project included) | [`app/`](app) |
-| 2 | Lightweight model ~20 MB | **10.7 MB** TFLite (MobileFaceNet 5.0 + MiniFASNet 5.7) | [`app/assets/models`](app/assets/models) |
+| 2 | Lightweight model ~20 MB | **19.9 MB** TFLite (EdgeFace-S 14.2 float32 + MiniFASNetV2 5.7) | [`app/assets/models`](app/assets/models) |
 | 3 | < 1 s recognize + liveness | On-device latency budget shown per verify; benchmark hooks | `benchmark/`, web stat strip |
 | 4 | Android 8.0+, no GPU, 3 GB RAM | `minSdk 26`, CPU TFLite delegate, ABI-split APKs | `android/` |
-| 5 | > 95% accuracy, Indian demographics, outdoor light | Compact ArcFace baseline + CLAHE/torch robustness; device + IndicFairFace validation documented | [`docs/NHAI_HACKATHON_ALIGNMENT.md`](docs/NHAI_HACKATHON_ALIGNMENT.md) |
+| 5 | > 95% accuracy, Indian demographics, outdoor light | Compact ArcFace baseline; quality gates bound pose, face size and exposure, and illumination feeds the composite score. IndicFairFace fine-tune documented as the next step | [`docs/NHAI_HACKATHON_ALIGNMENT.md`](docs/NHAI_HACKATHON_ALIGNMENT.md) |
 | 6 | Open-source only, source shared | All deps MIT / Apache-2.0; full source in repo | this repo |
 | D1 | Working cross-platform prototype | React Native app | [`app/`](app) |
 | D1a | Offline liveness (blink/smile/turn) | Passive MiniFASNet + active challenge | `app/src/face/liveness.ts` |
@@ -147,9 +147,13 @@ iOS does **not** use APK files. The iOS equivalent is a signed `.ipa` or TestFli
 
 | Model | Role | Size | License |
 |-------|------|------|---------|
-| MobileFaceNet (TFLite) | recognition (current compact baseline) | 5.0 MB | open-source |
-| MiniFASNetV2-SE (TFLite) | passive anti-spoof | 5.7 MB | Apache-2.0 |
-| EdgeFace-S | final compact recognition target (INT8) | ~1–2 MB | open-source |
+| **EdgeFace-S (TFLite, float32)** | recognition — 112×112 → 512-d ArcFace embedding | 14.2 MB | open-source |
+| **MiniFASNetV2 (TFLite)** | passive anti-spoof — 80×80 BGR, 3-class | 5.7 MB | Apache-2.0 |
+| Motion-parallax structure check | 3D liveness from landmark geometry — no model file | 0 MB | this project |
+
+Bundled total is **19.9 MB**, inside the 20 MB brief. A float16 or INT8 re-quantisation of
+EdgeFace-S is the documented headroom lever; note that templates are not portable across
+model changes, so a swap forces re-enrollment.
 
 ML Kit provides on-device face detection + landmarks (blink/smile/head-pose) for the active liveness challenge and the attention monitor.
 

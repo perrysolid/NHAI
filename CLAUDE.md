@@ -118,7 +118,7 @@ Three model families, one detector. All on-device, all open-source.
 | Model | Role | Where declared | Input | Output | Bundled size |
 |---|---|---|---|---|---|
 | **EdgeFace-S** (TFLite, **float32**) | recognition | `RECOGNITION_MODELS.edgeface_s` | 112×112×3 RGB, `(px/255 − 0.5)/0.5` | 512-d, L2-normalized | **14.2 MB** |
-| **MiniFASNetV2-SE** (TFLite) | passive anti-spoof | `LIVENESS_MODEL` | 80×80×3 **BGR**, 2.7× bbox crop, `px/255` only (mean 0, std 1 — no mean-centering) | 3-class softmax, **index 1 = live** | **5.7 MB** |
+| **MiniFASNetV2** (TFLite) | passive anti-spoof | `LIVENESS_MODEL` | 80×80×3 **BGR**, 2.7× bbox crop, **raw 0–255** (see below) | 3-class softmax, **index 1 = live** | **5.7 MB** |
 | **ML Kit Face Detection** | detection, landmarks, blink/smile/pose | `useFaceDetector` in `CameraScreen.tsx` | camera frame | boxes, 5 landmarks, eye-open + smile probabilities, yaw/pitch | native SDK |
 | MobileFaceNet (192-d) | *declared but not bundled* | `RECOGNITION_MODELS.mobilefacenet` | 112×112×3 | 192-d | — |
 | face-api tiny detector + recognition | web mirror only | `web/public/models/` | — | 128-d descriptor | ~7 MB |
@@ -146,6 +146,33 @@ Several docs are stale on the model facts. The code is right:
 If you re-quantize, you must re-verify I/O in [netron.app](https://netron.app),
 update `RecognitionSpec.dtype`, and **force re-enrollment** — templates are not
 portable across models (see §7).
+
+### MiniFASNet expects raw 0–255, and this was a real bug
+
+`LIVENESS_MODEL.std` is `[1/255, 1/255, 1/255]`, which makes `preprocessRgb`
+(`px/255/std − mean/std`) emit **raw pixel values**. That looks wrong and is not.
+
+Layer names inside the flatbuffer trace the model to DeepFace's vendored
+`FasNetBackbone`, itself a verbatim copy of Minivision's Silent-Face — where
+`ToTensor` is **not** torchvision's but their own, with the `.div(255)` line
+commented out (`modify by zkx`). The docstring still claims `[0,1]` and is simply
+wrong. The network was trained on 0–255.
+
+Feeding 0–1 made every activation 255× too small. **Measured on the actual
+model:** live-probability was pinned at ~0.007 for *any* input — std 0.0004
+across 40 wildly different inputs. It was not scoring real faces low, it was a
+constant function, which is why no threshold ever worked. At 0–255 it
+discriminates (face-like blob 0.79, high-frequency grid 0.001).
+
+The `channelOrder: 'bgr'` and `liveClassIndex: 1` were correct all along —
+`cv2.imread` with no `cvtColor` upstream, and `argmax == 1` in `test.py`. Don't
+re-suspect them.
+
+Two known-remaining mismatches with upstream, worth fixing if separation is poor:
+upstream crops a **rectangular** `box_w × 2.7, box_h × 2.7` and squashes it to
+80×80, while `faceCrop` uses a square `max(w,h)`; and upstream sums **two**
+models (V2 @2.7 + V1SE @4.0) — only the V2 is bundled, so any threshold quoted
+for Silent-Face is an ensemble threshold and does not transfer.
 
 ### Threshold rationale (don't tune blind)
 
@@ -236,12 +263,20 @@ UI — it is advisory, not blocking.
 anti-spoof. That is sufficient for threats 1–3 and structurally insufficient for
 4–6. Do not describe the system as replay-proof without this caveat.
 
-The fix is calibration, not code: score real faces and screen replays on target
-hardware, confirm the channel order (`channelOrder: 'bgr'` — Silent-Face was
-trained on OpenCV images; an RGB/BGR mismatch is the most likely cause of the bad
-scores), pick a floor with real separation, then flip the flag. Treat
-mis-calibrated passive liveness as a *bug in the calibration*, never as a reason
-to delete the defence.
+**The cause was found: a 255× input-scaling bug, now fixed** (see §4). The model
+was emitting a constant, so it could never have separated anything. What remains
+is genuine calibration: score real faces and screen replays on target hardware,
+put `livenessPassiveFloor` in the measured gap, then flip
+`PASSIVE_SCREEN_BLOCK`. The passive score is shown on the verdict line for both
+pass and fail, so collecting it needs no special build.
+
+Watch for a false-accept bias while calibrating: 40 random colour-noise inputs
+averaged **0.994 live**. If real faces and screen replays do not separate, the
+model is wrong for this hardware — swap to the 600 KB
+[facenox](https://github.com/facenox/face-antispoof-onnx) MiniFAS variant
+(Apache-2.0, RGB, square 1.5× crop, 128², 2 logits) rather than tuning a
+threshold that isn't there. Treat mis-calibrated passive liveness as a *bug*,
+never as a reason to delete the defence.
 
 ### Rules for anyone touching liveness
 
@@ -300,11 +335,15 @@ real BPCER. Skip them.
 To beat a relay you must stop challenging *the person's behaviour* and start
 challenging *the physics of the capture*. In effort/return order:
 
-1. **Recalibrate MiniFASNet and re-enable passive PAD (4).** Free — the model is
-   already bundled. Catches the *display medium*, which is present in 4 and 5
-   alike: a relayed video call is still a screen in front of a lens. Verify the
-   BGR channel order first. An optimized MiniFASNetV2-SE exists at **600 KB with
-   ~98% on 70k samples**, versus the mis-calibrated 5.7 MB file bundled here.
+1. **Calibrate MiniFASNet and re-enable passive PAD (4).** The 255× scaling bug
+   that made it useless is **fixed** (§4); what remains is measuring the floor.
+   Free — the model is bundled, and the passive score is now on the verdict line
+   for both pass and fail, so no special build is needed. Catches the *display
+   medium*, present in 4 and 5 alike: a relayed video call is still a screen in
+   front of a lens. If real faces and screen replays don't separate, swap to the
+   600 KB facenox variant rather than tuning a threshold that isn't there. That
+   swap also frees ~5 MB of the 19.9/20 MB model budget, which is what unblocks
+   everything else.
 2. **Per-action response deadline (5). ✅ IMPLEMENTED.** Each action now carries
    its own deadline measured from the moment it is demanded
    (`LIVENESS_ACTION_DEADLINE_MS`, `deadlineForAction()`), with
@@ -336,20 +375,68 @@ challenging *the physics of the capture*. In effort/return order:
    deadline tuned only against genuine users may have bought nothing), and
    whether your test group represents the field. Every second removed comes
    straight out of the attacker's budget, so tighten as far as the data allows.
-3. **Flash / no-flash reflection check (5) — the real fix.** Capture one frame
-   with the torch or a bright screen and one without, then compare **specular
-   reflection in the iris** (a live cornea returns a bright point highlight that a
-   screen or print physically cannot reproduce) plus **diffuse reflection across
-   the face** for coarse 3D structure. This is SpecDiff (IJCB 2020 Best Paper):
-   one monocular RGB camera with flash, reported to beat other flash-based PAD on
-   NUAA / Replay-Attack / SiW at **~6× the speed of DNN approaches**. Fits the
-   CPU/RAM/size budget and behaves identically on Android and iOS. Prerequisite:
-   torch is **not wired** (see §7) — `robustness/lighting.ts` computes a
-   `shouldUseTorch` recommendation nothing consumes.
-4. **Randomized screen-colour sequence (5, 6).** Face Flashing / iProov Flashmark
-   style: project a one-time unpredictable colour sequence and verify the
-   reflection matches. Once used the code is worthless, so it cannot be replayed.
-   Layer this on top of (3) once the reflection pipeline exists.
+3. **Screen-flash spatial confinement (4, 5, 6) — the real fix.** Flash the
+   screen, then compare the normalized response
+   `S = (I_flash − I_dark)/(I_flash + I_dark)` between the **face region** and the
+   **background**. Under a Lambertian model the surface reflectance `K` cancels in
+   that ratio, so it is *skin-tone invariant* while still encoding `cos θ` — the
+   reason to use this form rather than a raw difference. Then:
+
+   | | face | background | `R = face/bg` |
+   |---|---|---|---|
+   | Live face (30 cm, background 1–3 m, 1/d² falloff) | strong | ≈0 | **large** |
+   | Screen or print held up — a flat panel at uniform distance | strong | strong | **≈1** |
+   | Injected / virtual-camera stream | ≈0 | ≈0 | undefined |
+
+   Gate on **two** scalars: face response above a floor (catches injection — the
+   one thing that touches threat 6) *and* `R` above a threshold (catches flat
+   panels). Add a plane-fit residual over `S` for 3D structure: a panel is a
+   plane, a face lit from 30 cm is not. This is LiveScreen (Rutgers, INFOCOM
+   2020), pure JS on the existing 256 px buffer — no model, no bytes.
+
+   **The torch cannot be used. Front cameras have no torch** — `hasTorch` is
+   false and vision-camera *throws*. `robustness/lighting.ts`'s `shouldUseTorch`
+   is unimplementable, not merely unwired. The illuminant must be the screen,
+   which needs native brightness control (`WindowManager.screenBrightness`,
+   window-scoped, **no permission**; `UIScreen.main.brightness` on iOS).
+
+   **Validate AE/AWB lock FIRST — everything depends on it.** Auto-exposure
+   compensates for the flash and cancels the signal being measured, and
+   vision-camera 4.5 exposes only exposure *bias*, no lock. Expect a
+   `patch-package` on `CONTROL_AE_LOCK`/`CONTROL_AWB_LOCK`. If that proves
+   impossible, this whole family of methods is unimplementable — find out before
+   writing descriptor code.
+
+   **Do not attempt corneal-glint matching.** At 30 cm a phone screen reflects to
+   ~11% of iris width, and at `mediumLongEdge = 256` the iris is ~9 px — so the
+   reflected image is **about one pixel**. The published two-eye IoU threshold
+   also assumes a *distant* source, which a phone at arm's length is not. SpecDiff
+   still gives us the descriptor form above; its iris term does not survive our
+   resolution.
+4. **Randomized colour + a ~150 ms response window (5) — the actual relay
+   defence.** Pick the flash colour per attempt at random from {R,G,B,W}, never
+   cached, and require the response in the *flashed channel* to appear in the
+   frames whose timestamps fall inside the flash window.
+
+   **This is the structural answer to a live relay, and it costs zero BPCER.**
+   A live face responds at the speed of light; the only delay is camera pipeline
+   latency, constant per device and measurable once. A relay must additionally
+   encode → transmit → decode → re-encode, measured at **100–500 ms**. So the
+   attacker's budget drops from the 4–5 s behavioural deadline to roughly one
+   camera frame — and unlike tightening `LIVENESS_ACTION_DEADLINE_MS`, the user
+   does nothing, so there is no false-reject cost. Red is the strongest channel
+   for skin; even a +10% red boost gave >80% detection in LiveScreen.
+
+   Prefer a **two-colour differential** (colour A ~200 ms, then colour B at
+   matched luminance) over flash-vs-dark: identical ambient and identical total
+   luminance in both frames, so ambient *and* the flash DC cancel, leaving a pure
+   chromatic response. Better conditioned, and still inside ~500 ms.
+
+   Requires AWB lock, or auto-white-balance neutralises the very colour cast
+   being measured. And note the ceiling: offline, the sequence is generated and
+   checked on the same untrusted device — iProov does both in the cloud
+   *specifically* for that reason. Raises the bar hugely against the realistic
+   field attack; not a cryptographic guarantee.
 5. **Device integrity / capture attestation (6).** Play Integrity API on Android,
    DeviceCheck/App Attest on iOS; root and emulator detection; refuse external and
    virtual camera devices — `useCameraDevice('front')` should assert a physical
@@ -465,12 +552,14 @@ outside that city read "not in zone"). Mock-provider fixes are rejected.
   Enrollment (iterates all) and verify (samples a subset) pick it up automatically.
 - **Backend is ESM** (`"type": "module"`) — relative imports need the `.js`
   extension even in TypeScript source. Match the existing style.
-- **`app/src/robustness/lighting.ts` is dead code.** Nothing imports it outside
-  its own test. `decideLighting()` and `stretchLuma()` are written and tested but
-  never called, so there is **no torch control and no contrast normalization in
-  the running pipeline** — the README's "CLAHE/torch robustness" claim for
-  outdoor lighting is currently unbacked. Brightness only feeds the quality gate
-  and the illumination sub-score. Wire it or drop the claim.
+- **`app/src/robustness/lighting.ts` is dead code, and its `shouldUseTorch` is
+  unimplementable.** Nothing imports it outside its own test. Worse than unwired:
+  **front cameras have no torch**, so that recommendation can never be consumed
+  (§5, item 3). `stretchLuma()` is genuinely usable but never called, so there is
+  no contrast normalization in the running pipeline — the README's "CLAHE/torch
+  robustness" claim for outdoor lighting is unbacked. Drop `shouldUseTorch`,
+  repoint any flash work at the *screen*, and either wire `stretchLuma` or drop
+  the claim.
 - `docs/SHARDING_PROXY_INTEGRITY.md` documents a Cloudflare Worker at
   `backend/src/proxy-worker.js`. **That file does not exist.** The edge proxy is a
   design, not an implementation.
