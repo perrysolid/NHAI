@@ -127,7 +127,11 @@ const ENROLL_ROLES: {id: string; label: string}[] = [
 const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 
 // Bump alongside android versionName so a screenshot reveals the running build.
-const APP_VERSION = 'v3.0 · build 22';
+// Keep in step with android/app/build.gradle — versionName / versionCode there
+// are authoritative for a release, and this string is what the operator reads in
+// Settings. They drifted once (this said v3.0 build 22 while shipped APKs were
+// 4.2 build 35), which makes a field bug report point at the wrong build.
+const APP_VERSION = 'v4.2 · build 35';
 
 /**
  * One downscaled full-frame RGB buffer plus the face box already scaled into its
