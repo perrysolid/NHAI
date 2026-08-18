@@ -10,6 +10,7 @@
  */
 import {Pool} from 'pg';
 import {getSupabase, isSupabaseConfigured} from './supabase.js';
+import {evaluatePresence} from './presence.js';
 
 export interface InspectionMetrics {
   ear: number;
@@ -44,6 +45,11 @@ export interface AttendanceRecord {
   inspection?: InspectionMetrics;
   /** On-device geofence summary — present when the device had a GPS fix. */
   location?: RecordLocation;
+  /** DERIVED SERVER-SIDE by presence.ts — never trusted from the device.
+   *  The attendance register column: was this inspector marked present? */
+  present?: boolean;
+  /** Why `present` holds that value, e.g. 'outside_assigned_site'. */
+  presenceReason?: string;
 }
 
 function optNum(v: unknown): number | undefined {
@@ -66,6 +72,16 @@ export interface Store {
    * gates) without exposing internal state to the HTTP layer.
    */
   guard(records: AttendanceRecord[]): Promise<AttendanceRecord[]>;
+}
+
+/**
+ * Stamp the derived attendance mark onto a record before it is stored.
+ * Always recomputed server-side — a `present` value arriving from a device is
+ * ignored, because the whole point is that the register is not device-decided.
+ */
+function withPresence(r: AttendanceRecord): AttendanceRecord {
+  const {status, reason} = evaluatePresence(r);
+  return {...r, present: status === 'present', presenceReason: reason};
 }
 
 function keyOf(r: AttendanceRecord): string {
@@ -279,7 +295,8 @@ class MemoryStore implements Store {
 
   async init(): Promise<void> {}
 
-  async add(records: AttendanceRecord[]): Promise<AttendanceRecord[]> {
+  async add(input: AttendanceRecord[]): Promise<AttendanceRecord[]> {
+    const records = input.map(withPresence);
     for (const r of records) {
       const k = keyOf(r);
       if (!this.seen.has(k)) {
@@ -378,6 +395,8 @@ class PostgresStore implements Store {
         latency_ms     INTEGER,
         metrics        JSONB,
         location       JSONB,
+        present        BOOLEAN,
+        presence_reason TEXT,
         created_at     TIMESTAMPTZ DEFAULT now(),
         PRIMARY KEY (user_id, ts, device_id)
       );
@@ -389,6 +408,8 @@ class PostgresStore implements Store {
       'latency_ms INTEGER',
       'metrics JSONB',
       'location JSONB',
+      'present BOOLEAN',
+      'presence_reason TEXT',
     ]) {
       await this.pool.query(
         `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS ${col};`,
@@ -396,11 +417,12 @@ class PostgresStore implements Store {
     }
   }
 
-  async add(records: AttendanceRecord[]): Promise<AttendanceRecord[]> {
+  async add(input: AttendanceRecord[]): Promise<AttendanceRecord[]> {
+    const records = input.map(withPresence);
     for (const r of records) {
       await this.pool.query(
-        `INSERT INTO attendance (user_id, ts, device_id, liveness_passed, match_distance, confidence, score, latency_ms, metrics, location)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        `INSERT INTO attendance (user_id, ts, device_id, liveness_passed, match_distance, confidence, score, latency_ms, metrics, location, present, presence_reason)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
          ON CONFLICT (user_id, ts, device_id) DO NOTHING`,
         [
           r.userId,
@@ -413,6 +435,8 @@ class PostgresStore implements Store {
           r.latencyMs ?? null,
           r.inspection ? JSON.stringify(r.inspection) : null,
           r.location ? JSON.stringify(r.location) : null,
+          evaluatePresence(r).status === 'present',
+          evaluatePresence(r).reason,
         ],
       );
     }
@@ -477,7 +501,7 @@ class PostgresStore implements Store {
 
   async list(limit: number, since = 0): Promise<AttendanceRecord[]> {
     const res = await this.pool.query(
-      `SELECT user_id, ts, device_id, liveness_passed, match_distance, confidence, score, latency_ms, metrics, location
+      `SELECT user_id, ts, device_id, liveness_passed, match_distance, confidence, score, latency_ms, metrics, location, present, presence_reason
          FROM attendance WHERE ts >= $1
         ORDER BY ts DESC LIMIT $2`,
       [since, limit],
@@ -500,6 +524,8 @@ class PostgresStore implements Store {
                 : row.location,
             )
           : undefined,
+      present: row.present ?? undefined,
+      presenceReason: row.presence_reason ?? undefined,
     }));
   }
 }
@@ -535,6 +561,8 @@ class SupabaseStore implements Store {
       latency_ms: r.latencyMs ?? null,
       metrics: r.inspection ?? null,
       location: r.location ?? null,
+      present: evaluatePresence(r).status === 'present',
+      presence_reason: evaluatePresence(r).reason,
     };
   }
   private fromRow(row: Record<string, unknown>): AttendanceRecord {
@@ -552,9 +580,12 @@ class SupabaseStore implements Store {
         row.location != null
           ? sanitizeLocation(row.location as Record<string, unknown>)
           : undefined,
+      present: (row.present as boolean | null) ?? undefined,
+      presenceReason: (row.presence_reason as string | null) ?? undefined,
     };
   }
-  async add(records: AttendanceRecord[]): Promise<AttendanceRecord[]> {
+  async add(input: AttendanceRecord[]): Promise<AttendanceRecord[]> {
+    const records = input.map(withPresence);
     const {error} = await this.db
       .from('attendance')
       .upsert(records.map(r => this.toRow(r)), {
