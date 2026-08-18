@@ -60,3 +60,8 @@ debug_imgs/
 .venv_tf311/
 finetune/tflite_clean/
 finetune/*.onnx.data
+
+# Vendored agent tooling (re-fetched from anthropics/skills, includes __pycache__)
+app/.agents/
+app/skills-lock.json
+academic-pptx-skill-main.zip

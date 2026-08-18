@@ -6,6 +6,7 @@
  * (lighting), and weak matches. Plain SSR HTML, no client framework, no emoji.
  */
 import type {AttendanceRecord, InspectionMetrics} from './store.js';
+import {evaluatePresence, presenceReasonLabel} from './presence.js';
 
 const MATCH_THRESHOLD = 0.5;
 
@@ -85,6 +86,18 @@ function geofenceCell(r: AttendanceRecord): string {
   )}m</span></td>`;
 }
 
+/**
+ * The attendance register column. Recomputed here rather than trusting the
+ * stored flag, so an older row written before this column existed still renders
+ * a correct verdict instead of a blank.
+ */
+function presenceCell(r: AttendanceRecord): string {
+  const {status, reason} = evaluatePresence(r);
+  const cls = status === 'present' ? 'chip--ok' : 'chip--bad';
+  return `<td><span class="chip ${cls}">${status === 'present' ? 'PRESENT' : 'ABSENT'}</span>` +
+         `<div class="dim" style="font-size:11px;margin-top:3px">${esc(presenceReasonLabel(reason))}</div></td>`;
+}
+
 function flagChips(f: RowFlags): string {
   const chips: string[] = [];
   if (f.drowsy) chips.push('<span class="chip chip--bad">Drowsy</span>');
@@ -143,6 +156,7 @@ export function renderDashboard(
   const total = records.length;
   const subjects = new Set(records.map(r => r.userId)).size;
   const livenessPass = records.filter(r => r.livenessPassed).length;
+  const presentCount = records.filter(r => evaluatePresence(r).status === 'present').length;
   const livenessRate = total ? livenessPass / total : 0;
   const withMetrics = records.filter(r => r.inspection);
   const drowsy = withMetrics.filter(r => r.inspection?.drowsy).length;
@@ -178,6 +192,7 @@ export function renderDashboard(
       return `<tr class="${rowTone}">
         <td class="mono">${esc(r.userId)}</td>
         <td class="mono dim">${new Date(r.timestamp).toLocaleString()}</td>
+        ${presenceCell(r)}
         <td>${r.livenessPassed ? '<span class="chip chip--ok">pass</span>' : '<span class="chip chip--bad">blocked</span>'}</td>
         <td class="mono ${scoreTone}">${typeof r.score === 'number' ? r.score : '—'}</td>
         <td class="mono">${r.matchDistance.toFixed(3)}</td>
@@ -249,6 +264,7 @@ export function renderDashboard(
     ${kpiCard('Subjects', String(subjects))}
     ${kpiCard('Avg auth score', scored.length ? Math.round(avgScore).toString() : '—', avgScore >= 85 ? 'signal' : avgScore >= 70 ? 'warn' : 'bad')}
     ${kpiCard('Liveness pass', pct(livenessRate), livenessRate >= 0.99 ? 'signal' : 'warn')}
+    ${kpiCard('Marked present', `${presentCount} / ${total}`, presentCount === total ? 'signal' : presentCount >= total * 0.9 ? 'warn' : 'bad')}
     ${kpiCard('Attacks blocked', String(attacksBlocked), attacksBlocked > 0 ? 'bad' : 'signal')}
     ${kpiCard('Avg match dist', avgDist.toFixed(3))}
     ${kpiCard('Drowsy events', String(drowsy), drowsy > 0 ? 'bad' : 'signal')}
@@ -273,7 +289,7 @@ export function renderDashboard(
         ? '<div class="empty">No records yet. Verify a subject in the app and sync.</div>'
         : `<table>
       <thead><tr>
-        <th>Subject</th><th>Time</th><th>Liveness</th><th>Score</th><th>Distance</th>
+        <th>Subject</th><th>Time</th><th>Attendance</th><th>Liveness</th><th>Score</th><th>Distance</th>
         <th>EAR</th><th>PERCLOS</th><th>Blink</th><th>Yaw / Light</th>
         <th>Site / GPS</th><th>Inspection</th><th>Device</th>
       </tr></thead>
