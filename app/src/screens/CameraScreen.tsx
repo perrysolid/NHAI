@@ -131,7 +131,7 @@ const LOGO = require('../../assets/branding/datalake-face-auth-logo.png');
 // are authoritative for a release, and this string is what the operator reads in
 // Settings. They drifted once (this said v3.0 build 22 while shipped APKs were
 // 4.2 build 35), which makes a field bug report point at the wrong build.
-const APP_VERSION = 'v4.2 · build 35';
+const APP_VERSION = 'v4.2 · build 36';
 
 /**
  * One downscaled full-frame RGB buffer plus the face box already scaled into its
