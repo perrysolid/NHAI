@@ -85,12 +85,35 @@ function withPresence(r: AttendanceRecord): AttendanceRecord {
 }
 
 /**
- * Postgres 42703 = undefined_column. PostgREST surfaces it both as a `code` and
- * in the message, and the shape has varied across client versions, so match on
- * either rather than trusting one field.
+ * A missing column, in every shape this stack reports one.
+ *
+ * There are TWO distinct errors, and matching only the obvious one is what made
+ * the first version of this guard useless in production:
+ *
+ *   reads   Postgres 42703  "column attendance.present does not exist"
+ *   writes  PostgREST 204   "Could not find the 'presence_reason' column of
+ *                            'attendance' in the schema cache"
+ *
+ * The write path never returns 42703. PostgREST builds the statement from its
+ * cached schema, so an unknown column is rejected client-side before Postgres
+ * is ever asked — a different code AND a message with no "does not exist" in
+ * it. The observed failure on the deployed instance was the second form.
+ *
+ * Codes are checked first; the message patterns are the fallback for client
+ * versions that omit `code`.
  */
 export function isMissingColumnError(e: {code?: string; message?: string}): boolean {
-  return e.code === '42703' || /does not exist/i.test(e.message ?? '');
+  if (e.code === '42703' || e.code === 'PGRST204') {
+    return true;
+  }
+  // Deliberately column-scoped. A missing TABLE reports through the same two
+  // channels ("relation ... does not exist", PGRST205 "Could not find the table
+  // ... in the schema cache") and is a real outage — retrying it with two fields
+  // removed would just fail again while hiding the cause.
+  const m = e.message ?? '';
+  return (
+    /column .* does not exist/i.test(m) || /could not find the .* column/i.test(m)
+  );
 }
 
 function keyOf(r: AttendanceRecord): string {
