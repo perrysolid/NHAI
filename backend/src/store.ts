@@ -84,6 +84,15 @@ function withPresence(r: AttendanceRecord): AttendanceRecord {
   return {...r, present: status === 'present', presenceReason: reason};
 }
 
+/**
+ * Postgres 42703 = undefined_column. PostgREST surfaces it both as a `code` and
+ * in the message, and the shape has varied across client versions, so match on
+ * either rather than trusting one field.
+ */
+export function isMissingColumnError(e: {code?: string; message?: string}): boolean {
+  return e.code === '42703' || /does not exist/i.test(e.message ?? '');
+}
+
 function keyOf(r: AttendanceRecord): string {
   return `${r.userId}|${r.timestamp}|${r.deviceId}`;
 }
@@ -542,11 +551,34 @@ class SupabaseStore implements Store {
     }
     return c;
   }
+  /**
+   * Whether the table actually has the derived presence columns.
+   *
+   * Unlike PostgresStore, this store CANNOT self-migrate — PostgREST exposes no
+   * DDL, so `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` has no equivalent here.
+   * A column added to the code but not to the database therefore made every
+   * upsert fail with 42703, which turned a derived, entirely optional field
+   * into a total outage of attendance sync. Presence is computed from the
+   * record and recomputed at render time, so losing the persisted copy must
+   * never cost a real attendance record. Probed at init, and re-checked if a
+   * write ever disagrees.
+   */
+  private hasPresenceColumns = true;
+
   async init(): Promise<void> {
     const {error} = await this.db.from('attendance').select('user_id').limit(1);
     if (error && !/permission|row-level/i.test(error.message)) {
       // eslint-disable-next-line no-console
       console.warn(`[store] Supabase probe: ${error.message} — run docs/SUPABASE.md schema.`);
+    }
+    const probe = await this.db.from('attendance').select('present').limit(1);
+    if (probe.error && isMissingColumnError(probe.error)) {
+      this.hasPresenceColumns = false;
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[store] attendance.present / presence_reason missing — syncing without ' +
+          'them. Run the ALTER TABLE in docs/SUPABASE.md to persist the register.',
+      );
     }
   }
   private toRow(r: AttendanceRecord) {
@@ -561,8 +593,12 @@ class SupabaseStore implements Store {
       latency_ms: r.latencyMs ?? null,
       metrics: r.inspection ?? null,
       location: r.location ?? null,
-      present: evaluatePresence(r).status === 'present',
-      presence_reason: evaluatePresence(r).reason,
+      ...(this.hasPresenceColumns
+        ? {
+            present: evaluatePresence(r).status === 'present',
+            presence_reason: evaluatePresence(r).reason,
+          }
+        : {}),
     };
   }
   private fromRow(row: Record<string, unknown>): AttendanceRecord {
@@ -586,12 +622,29 @@ class SupabaseStore implements Store {
   }
   async add(input: AttendanceRecord[]): Promise<AttendanceRecord[]> {
     const records = input.map(withPresence);
-    const {error} = await this.db
+    let {error} = await this.db
       .from('attendance')
       .upsert(records.map(r => this.toRow(r)), {
         onConflict: 'user_id,ts,device_id',
         ignoreDuplicates: true,
       });
+    // The columns can go missing between init and now (a store pointed at a
+    // fresh project, a rolled-back migration). Drop the derived fields and
+    // retry once: attendance is the record that matters, presence is not.
+    if (error && isMissingColumnError(error) && this.hasPresenceColumns) {
+      this.hasPresenceColumns = false;
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[store] presence columns absent — retrying sync without them. ' +
+          'Run the ALTER TABLE in docs/SUPABASE.md.',
+      );
+      ({error} = await this.db
+        .from('attendance')
+        .upsert(records.map(r => this.toRow(r)), {
+          onConflict: 'user_id,ts,device_id',
+          ignoreDuplicates: true,
+        }));
+    }
     if (error) {
       throw new Error(error.message);
     }
