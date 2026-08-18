@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import {
   RateLimitExceededError,
   createStore,
+  isMissingColumnError,
   sanitizeMany,
   type AttendanceRecord,
   type Store,
@@ -213,5 +214,45 @@ describe('list', () => {
       await submit(store, [rec({timestamp: ts, deviceId: `d${ts}`})]);
     }
     assert.equal((await store.list(100, 2_000)).length, 1);
+  });
+});
+
+
+/**
+ * Regression: adding `present` / `presence_reason` to the code without adding
+ * them to a Supabase project made every upsert fail with 42703, so devices
+ * could not drain their offline queues at all. A derived, optional column took
+ * down attendance sync. The store now detects that error and retries without
+ * the columns, which only works if the detection is right.
+ */
+describe('missing-column detection', () => {
+  test('recognises the PostgREST 42703 shape', () => {
+    assert.equal(
+      isMissingColumnError({
+        code: '42703',
+        message: 'column attendance.present does not exist',
+      }),
+      true,
+    );
+  });
+
+  test('recognises it from the message alone', () => {
+    // Older clients surface no `code`.
+    assert.equal(
+      isMissingColumnError({message: 'column attendance.present does not exist'}),
+      true,
+    );
+  });
+
+  test('does not swallow unrelated failures', () => {
+    // Must NOT trigger the drop-columns retry — that would mask real outages.
+    for (const e of [
+      {code: '23505', message: 'duplicate key value violates unique constraint'},
+      {code: '42501', message: 'permission denied for table attendance'},
+      {message: 'fetch failed'},
+      {},
+    ]) {
+      assert.equal(isMissingColumnError(e), false, JSON.stringify(e));
+    }
   });
 });

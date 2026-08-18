@@ -36,10 +36,32 @@ create table if not exists public.attendance (
   latency_ms      integer,
   metrics         jsonb,
   location        jsonb,
+  present         boolean,
+  presence_reason text,
   created_at      timestamptz default now(),
   primary key (user_id, ts, device_id)
 );
 ```
+
+### Migrating an existing project
+
+**Run this on any Supabase project created before the attendance register was
+added**, otherwise every `POST /api/sync` fails with `42703 column
+attendance.present does not exist` and devices cannot drain their queues:
+
+```sql
+alter table public.attendance add column if not exists present boolean;
+alter table public.attendance add column if not exists presence_reason text;
+```
+
+> **Why this is a manual step.** `PostgresStore` self-migrates via
+> `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in `init()`. `SupabaseStore` cannot:
+> PostgREST exposes no DDL. So **any new column added to the code must be added
+> here by hand**, and a Supabase deployment will not pick it up from a code
+> release. The store now probes for these two columns at startup and syncs
+> without them if they are absent — attendance survives a missed migration, but
+> the register column stays empty until the ALTER is run and the service is
+> restarted.
 
 ```sql
 -- Central inspector registry (online enrollment: on-device embedding + details).
