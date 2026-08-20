@@ -244,7 +244,7 @@ function scoreSanity(r: AttendanceRecord): boolean {
  *
  * Deliberately in-process, so it is per-instance and resets on restart. That is
  * an honest backstop, not the real control: distributed enforcement belongs at
- * the edge, keyed by deviceId (CLAUDE.md §8).
+ * the edge, keyed by deviceId (docs/ENGINEERING_NOTES.md §8).
  */
 class DeviceRateTracker {
   private hits = new Map<string, number[]>();

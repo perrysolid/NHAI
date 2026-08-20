@@ -305,7 +305,7 @@ matrix before making any compliance claim.
 | [AWS deployment](docs/AWS_DEPLOYMENT.md) | App Runner / ECS / EB / EC2 + RDS |
 | [Web + Render deployment](docs/WEB_RENDER_DEPLOYMENT.md) | Vercel frontend + Render backend |
 | [Implementation plan](docs/IMPLEMENTATION_PLAN.md) | Historical — kept for provenance, superseded on model choice |
-| [`CLAUDE.md`](CLAUDE.md) | Contributor contract: invariants, commands, anti-spoof rules, scale roadmap |
+| [Engineering notes](docs/ENGINEERING_NOTES.md) | Contributor contract: invariants, commands, anti-spoof rules, scale roadmap |
 | [`finetune/README.md`](finetune/README.md) | EdgeFace-S → IndicFairFace fine-tune → TFLite pipeline |
 
 ## Privacy & security

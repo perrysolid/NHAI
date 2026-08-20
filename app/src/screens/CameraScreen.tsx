@@ -1267,7 +1267,7 @@ export default function CameraScreen(): React.JSX.Element {
           // THRESHOLDS.livenessPassive so a passing record would not look like a
           // liveness failure, but livenessPassed already carries that verdict —
           // and the floor destroyed the one signal needed to calibrate
-          // MiniFASNet and re-enable passive anti-spoof (CLAUDE.md §5).
+          // MiniFASNet and re-enable passive anti-spoof (docs/ENGINEERING_NOTES.md §5).
           livenessScore: passiveScore,
           matchScore: verify.matchScore,
           livenessPassed: true,

@@ -36,12 +36,12 @@ DerivedData/
 .env.*
 !.env.example
 
-# ── Agent / editor / OS ──
+# ── Local editor / tooling / OS ──
+.vscode/
+.idea/
 .claude/
 .DS_Store
 *.log
-.vscode/
-.idea/
 
 # deck build artifacts
 docs/deck/.venv/
@@ -61,7 +61,10 @@ debug_imgs/
 finetune/tflite_clean/
 finetune/*.onnx.data
 
-# Vendored agent tooling (re-fetched from anthropics/skills, includes __pycache__)
+# Vendored tooling (re-fetchable, includes __pycache__) — not part of the product
+.agents/
 app/.agents/
+skills-lock.json
 app/skills-lock.json
+*-skill-main.zip
 academic-pptx-skill-main.zip

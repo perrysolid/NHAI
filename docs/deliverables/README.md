@@ -47,7 +47,7 @@ Package details:
 Blocks printed photos, static images on a screen, and slow or naive replays.
 **Passive screen detection (MiniFASNet) is bundled but not enforced** — it is
 pending on-device calibration, so a tight looping video, a live video-call relay,
-and virtual-camera injection are **not** blocked in this build. See CLAUDE.md §5
+and virtual-camera injection are **not** blocked in this build. See ../ENGINEERING_NOTES.md §5
 for the measurements behind that statement.
 
 
