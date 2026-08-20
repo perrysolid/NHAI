@@ -228,7 +228,7 @@ export const THRESHOLDS = {
  * travels back. That round trip is realistically 1-3s, and much longer when a
  * human has to read the prompt aloud; a genuine user in front of the lens has
  * none of it. This is the timing asymmetry from Face Flashing (NDSS 2018): a
- * legitimate response costs ~nothing, a forged one costs time. See CLAUDE.md §5.
+ * legitimate response costs ~nothing, a forged one costs time. See docs/ENGINEERING_NOTES.md §5.
  *
  * Budget = prompt delivery + human reaction + performing the action. These are
  * DELIBERATELY GENEROUS defaults, because every prompt is also SPOKEN

@@ -1,8 +1,8 @@
-# CLAUDE.md
+# Engineering Notes
 
-Operating guide for agents working in this repo. Read this before changing code.
+Working guide for anyone changing code in this repo. Read this first.
 
-Deep reference lives in [`docs/TECHNICAL_DOCUMENTATION.md`](docs/TECHNICAL_DOCUMENTATION.md)
+Deep reference lives in [`TECHNICAL_DOCUMENTATION.md`](TECHNICAL_DOCUMENTATION.md)
 (912 lines, per-file index). This file is the *contract*: invariants, commands,
 model facts, the anti-spoof rules, and the scale architecture. Where the two
 disagree, trust the code, then fix both.

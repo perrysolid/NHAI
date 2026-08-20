@@ -108,7 +108,7 @@ describe('ActiveLivenessChallenge', () => {
 });
 
 /**
- * Per-action deadline — the anti-relay control (CLAUDE.md §5, threat 5).
+ * Per-action deadline — the anti-relay control (docs/ENGINEERING_NOTES.md §5, threat 5).
  * A live accomplice on a video call satisfies any behavioural challenge, so the
  * only thing separating them from a genuine user is the latency of the relay
  * loop. These tests pin that the deadline is enforced per action, restarts for
@@ -270,7 +270,7 @@ describe('per-action response deadline', () => {
     // all four gestures in under ~4s still passes at close to 100% (measured),
     // because every gesture is then guaranteed to appear inside every deadline.
     // Stopping that needs medium detection (passive PAD / moiré / flash), not a
-    // behavioural challenge — see CLAUDE.md §5.
+    // behavioural challenge — see docs/ENGINEERING_NOTES.md §5.
     const period = 20000;
     const loopFrame = (t: number): Face => {
       const seg = Math.floor(((t % period) / period) * 4);

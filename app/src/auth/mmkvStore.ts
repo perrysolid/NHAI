@@ -7,7 +7,7 @@ const MMKV_ID = 'datalake-face-auth';
 // SECURITY DEBT: this key is a hardcoded placeholder, identical on every device,
 // so templates are not meaningfully encrypted. It must come from the Android
 // Keystore / iOS Keychain, generated per device on first run, before any real
-// deployment. Tracked in CLAUDE.md §8 as a rollout blocker.
+// deployment. Tracked in docs/ENGINEERING_NOTES.md §8 as a rollout blocker.
 const ENCRYPTION_KEY = 'replace-with-device-keychain-secret';
 
 /**

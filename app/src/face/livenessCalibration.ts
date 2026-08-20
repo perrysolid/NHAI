@@ -4,7 +4,7 @@
  * LIVENESS_ACTION_DEADLINE_MS can be set from field data instead of guesswork.
  *
  * WHY THIS EXISTS. The per-action deadline is the cheapest defence against a
- * live video-call relay (CLAUDE.md §5, threat 5): a relay cannot escape its
+ * live video-call relay (docs/ENGINEERING_NOTES.md §5, threat 5): a relay cannot escape its
  * round-trip latency, so a tight deadline separates "in front of the lens" from
  * "on the other end of a call". But the deadline is a two-sided error:
  *   • too loose → the relay fits inside it and the defence does nothing;
