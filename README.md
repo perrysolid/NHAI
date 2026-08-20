@@ -9,8 +9,9 @@
 ![iOS](https://img.shields.io/badge/iOS_15.5+-000000?style=for-the-badge&logo=apple)
 ![Offline](https://img.shields.io/badge/Auth-100%25_offline-38e0a5?style=for-the-badge)
 ![Models](https://img.shields.io/badge/Models-19.9_MB-38e0a5?style=for-the-badge)
+![Build](https://img.shields.io/badge/Latest_build-v4.2_·_36-38e0a5?style=for-the-badge)
 
-### &nbsp;[▶ Live demo](https://nhai-three.vercel.app)&nbsp; · &nbsp;[⬇ Download APK](https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk)&nbsp; · &nbsp;[Demo video](https://drive.google.com/drive/folders/14rTxUjJ_Wrdt349yWkksgE51m87zO97d?usp=sharing)&nbsp;
+### &nbsp;[▶ Live demo](https://nhai-three.vercel.app)&nbsp; · &nbsp;[⬇ Download APK](https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk)&nbsp; · &nbsp;[◱ Admin dashboard](https://datalake-face-sync.onrender.com/admin)&nbsp; · &nbsp;[Demo video](https://drive.google.com/drive/folders/14rTxUjJ_Wrdt349yWkksgE51m87zO97d?usp=sharing)&nbsp;
 
 <sub>NHAI Innovation Hackathon 7.0 · Datalake 3.0 &nbsp;|&nbsp; MIT / Apache-2.0 &nbsp;|&nbsp; [package notes](docs/deliverables/README.md)</sub>
 
@@ -27,7 +28,7 @@
 3. **Verify** — tap *Verify* and **center your face**; verification **starts automatically** (no tap). Complete the random liveness prompts (**blink / smile / turn**, random order). Match returns in **< 1s**, with an authentication score — all on-device.
 
 > **Fully hands-free.** Capture and verification trigger automatically once your face is centred (the ring turns green) — you never tap a capture/verify button. The on-screen *Capture* / *Start verify* buttons remain only as a manual fallback.
-4. **Spoof test** — hold up a **photo or a video on another phone**: liveness is **rejected** (it can't complete the live random sequence).
+4. **Spoof test** — hold up a **printed photo or a static image on another phone**: liveness is **rejected** (it cannot complete the live random sequence). *Scope: printed photos, static screen images, and slow/naive video loops are blocked. A deliberately tight video loop, a live video-call relay, and virtual-camera injection are* ***not*** *blocked in this build — see [the measured breakdown](docs/NHAI_HACKATHON_ALIGNMENT.md#honest-scope-of-the-anti-spoof).*
 5. **Offline proof** — turn on **airplane mode** and repeat steps 2–3: enrolment and verification still work; nothing leaves the device.
 6. **No install?** Open the [browser demo](https://nhai-three.vercel.app) to try the same pipeline instantly. *(Demonstration only; the APK is the deliverable.)*
 
@@ -43,7 +44,7 @@ flowchart LR
     CAM[Camera] --> DET[Face detection - ML Kit]
     DET --> GATE[Quality gates<br/>one face / pose / lighting]
     GATE --> LIVE[Liveness<br/>passive MiniFASNet + randomized blink/smile/head-turn]
-    LIVE --> REC[Recognition<br/>EdgeFace / MobileFaceNet TFLite]
+    LIVE --> REC[Recognition<br/>EdgeFace-S TFLite · 512-d]
     REC --> SCORE[Composite Authentication Score]
     SCORE --> Q[(Encrypted local queue)]
     ATT[Drowsiness / attention monitor] -.-> SCORE
@@ -133,9 +134,15 @@ Android release APKs are included in [`docs/deliverables/`](docs/deliverables). 
 
 **Direct APK link:** https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
 
-| Platform | File | Use |
-|----------|------|-----|
-| Android universal | [`DatalakeFaceAuth-android-universal-release.apk`](docs/deliverables/DatalakeFaceAuth-android-universal-release.apk) | One APK for judge phones: arm64-v8a + armeabi-v7a |
+**Latest build: `v4.2` (versionCode 36)** — verified with `aapt dump badging`.
+SHA-256 checksums for all three APKs are in
+[`docs/deliverables/README.md`](docs/deliverables/README.md).
+
+| Platform | File | Size | Use |
+|----------|------|------|-----|
+| Android universal | [`…-universal-release.apk`](docs/deliverables/DatalakeFaceAuth-android-universal-release.apk) | 82 MB | One APK for judge phones: arm64-v8a + armeabi-v7a |
+| Android 64-bit | [`…-arm64-v8a-release.apk`](docs/deliverables/DatalakeFaceAuth-android-arm64-v8a-release.apk) | 63 MB | Modern phones — smaller download |
+| Android 32-bit | [`…-armeabi-v7a-release.apk`](docs/deliverables/DatalakeFaceAuth-android-armeabi-v7a-release.apk) | 53 MB | Older 32-bit phones |
 
 ```bash
 adb install -r docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
@@ -187,6 +194,41 @@ cd backend && npm install && npm run build && npm start
 - **Backend → AWS:** App Runner / Elastic Beanstalk / ECS / EC2 via [`backend/Dockerfile`](backend/Dockerfile) + [`backend/apprunner.yaml`](backend/apprunner.yaml). See [`docs/AWS_DEPLOYMENT.md`](docs/AWS_DEPLOYMENT.md).
 - Full steps: [`docs/WEB_RENDER_DEPLOYMENT.md`](docs/WEB_RENDER_DEPLOYMENT.md).
 
+## Live deployment
+
+Everything below is deployed and reachable right now.
+
+| Surface | URL | Access |
+|---------|-----|--------|
+| **Admin dashboard** (ops console) | **https://datalake-face-sync.onrender.com/admin** | `?key=<ADMIN_PASSCODE>` — passcode shared privately, **not** in this repo |
+| Browser demo | https://nhai-three.vercel.app | public |
+| Sync backend | https://datalake-face-sync.onrender.com | `/health` is public; API routes need a key |
+| Android APK | [universal release](https://github.com/perrysolid/NHAI/raw/main/docs/deliverables/DatalakeFaceAuth-android-universal-release.apk) | public — `v4.2` build 36 |
+
+### Admin dashboard
+
+Server-rendered operations console for synced attendance — no client framework,
+loads on a field connection. It surfaces the records an operator actually needs
+to look at: drowsiness (PERCLOS / micro-sleep), inattention (look-away), weak
+matches, and poor capture quality, alongside per-site presence.
+
+```
+https://datalake-face-sync.onrender.com/admin?key=<ADMIN_PASSCODE>
+```
+
+> **Credentials are deliberately not committed.** This repository is public, so
+> `ADMIN_PASSCODE`, `ADMIN_USER`, and `ADMIN_PASSWORD` live only in the Render
+> environment and are shared with the team through a private channel. Requesting
+> `/admin` without a valid passcode returns `401`.
+
+There is also a JSON admin API behind `POST /api/admin/login`, which issues an
+ephemeral token for `GET /api/records`, `GET /api/enrollments`, and the site CRUD
+routes — see the [Backend API](#backend-api) table.
+
+> **First request may take ~30 s.** The backend runs on Render's free tier and
+> sleeps when idle; the next request is immediate. This affects the dashboard and
+> sync only — **never authentication**, which is entirely on-device.
+
 ## Demo Routes And Keys
 
 The public Vercel demo is a single-page app with direct routes enabled in
@@ -199,13 +241,26 @@ The public Vercel demo is a single-page app with direct routes enabled in
 | `/deployment` | Vercel + backend deployment settings and runtime checks |
 | `/aws` | AWS-specific setup: App Runner/RDS routes, secrets, client key placement |
 
-Backend routes are the same on AWS or Render:
+### Backend API
+
+Two independent credentials, both sent as `x-api-key`: the shared **device** key
+(`API_KEY`) and an **admin** token from `POST /api/admin/login`. The key baked
+into the app binary does **not** grant admin access. Both guards **fail closed** —
+unset credentials return `503` and the process refuses to start.
 
 | Backend route | Auth | Purpose |
 |---------------|------|---------|
-| `GET /health` | none | AWS/Render health check |
-| `POST /api/sync` | `x-api-key` when `API_KEY` is set | Receive verified attendance records |
-| `GET /api/records` | `x-api-key` when `API_KEY` is set | Return recent synced records |
+| `GET /health` | none | Health check (Render/AWS probe) |
+| `POST /api/sync` | device | Receive verified attendance records → `{accepted, rejected, acceptedRecords}` |
+| `GET /api/records` | **admin** | Recent synced records (`since` + `limit ≤ 1000`) |
+| `POST /api/admin/login` | none | `{username, password}` → ephemeral token |
+| `POST /api/enroll` | device | Upsert `{userId, role, embedding[], deviceId}` |
+| `GET /api/enrollments` | **admin** | Full enrollment registry |
+| `GET /api/enrollments/for/:userId` | device | Pull a template to verify that inspector offline |
+| `DELETE /api/enrollments/:userId` | **admin** | Remove an enrollment |
+| `GET /api/sites` · `POST /api/sites` · `DELETE /api/sites/:id` | **admin** | Geofence site CRUD |
+| `GET /api/sites/for/:userId` | device | Assigned sites, cached in MMKV for offline use |
+| `GET /admin?key=…` | `ADMIN_PASSCODE` | Server-rendered ops console |
 
 Where to add keys and cloud URLs:
 
@@ -219,20 +274,39 @@ Where to add keys and cloud URLs:
 
 ## Verification status
 
+Last run on commit `c688a23`, build `v4.2` (versionCode 36) — see
+[`docs/TEST_REPORT.md`](docs/TEST_REPORT.md) for the full output.
+
 | Package | Type-check | Lint | Tests | Build |
 |---------|-----------|------|-------|-------|
-| `app/` (native) | clean | clean | 28 unit tests pass | Android release APK builds (70 MB universal / 51 MB arm64 / 41 MB armv7) |
+| `app/` (native) | clean | 0 errors (4 style warnings) | **150 unit tests pass** (16 suites) | Android release APKs build (82 MB universal / 63 MB arm64 / 53 MB armv7) |
+| `backend/` | clean | — | **58 tests pass** (14 suites) | `tsc` build clean |
 | `web/` | clean | clean | 4 Playwright E2E pass | Vite production build |
-| `backend/` | clean | — | endpoint smoke (sync/records/dedupe) | `tsc` build |
+
+The live backend was checked at the same time: `GET /health` returns
+`{"ok":true,"store":"postgres"}`, and `GET /admin` without a passcode returns
+`401`.
 
 ## Documentation
 
-- [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
-- [Datalake 3.0 integration guide](docs/DATALAKE_INTEGRATION_GUIDE.md)
-- [Drowsiness & attention monitoring](docs/MONITORING_AND_DASHBOARD.md)
-- [NHAI hackathon alignment + honest gaps](docs/NHAI_HACKATHON_ALIGNMENT.md)
-- [AWS deployment](docs/AWS_DEPLOYMENT.md) · [Web + Render deployment](docs/WEB_RENDER_DEPLOYMENT.md)
-- [Test report](docs/TEST_REPORT.md)
+Start with the technical documentation for "how does X work", and the alignment
+matrix before making any compliance claim.
+
+| Document | What it covers |
+|----------|----------------|
+| [Technical documentation](docs/TECHNICAL_DOCUMENTATION.md) | **The deep reference** — per-module detail, pipeline walkthrough, file index |
+| [NHAI hackathon alignment](docs/NHAI_HACKATHON_ALIGNMENT.md) | Requirement matrix, model decision record, and the **honest gap list** — read before any compliance claim |
+| [Test report](docs/TEST_REPORT.md) | Verified test/build results for the current commit, with APK hashes |
+| [Judge mobile package](docs/deliverables/README.md) | APK install notes, build contents, iOS packaging steps |
+| [Datalake 3.0 integration guide](docs/DATALAKE_INTEGRATION_GUIDE.md) | Attendance record contract |
+| [Drowsiness & attention monitoring](docs/MONITORING_AND_DASHBOARD.md) | Alertness metrics and the ops view |
+| [Sharding, proxy & integrity](docs/SHARDING_PROXY_INTEGRITY.md) | Server-side integrity guard and the (unimplemented) edge proxy design |
+| [Supabase setup](docs/SUPABASE.md) | Using Supabase as the durable store |
+| [AWS deployment](docs/AWS_DEPLOYMENT.md) | App Runner / ECS / EB / EC2 + RDS |
+| [Web + Render deployment](docs/WEB_RENDER_DEPLOYMENT.md) | Vercel frontend + Render backend |
+| [Implementation plan](docs/IMPLEMENTATION_PLAN.md) | Historical — kept for provenance, superseded on model choice |
+| [`CLAUDE.md`](CLAUDE.md) | Contributor contract: invariants, commands, anti-spoof rules, scale roadmap |
+| [`finetune/README.md`](finetune/README.md) | EdgeFace-S → IndicFairFace fine-tune → TFLite pipeline |
 
 ## Privacy & security
 
@@ -241,4 +315,4 @@ Authentication is fully offline; **no image or video ever leaves the device**. O
 ## License & open-source credits
 
 All third-party components are open-source with no additional licensing required:
-React Native, react-native-vision-camera, react-native-fast-tflite, ML Kit face detection, MMKV (MIT); MobileFaceNet / MiniFASNet (open-source / Apache-2.0); @vladmandic/face-api (MIT); Express, Vite, React (MIT).
+React Native, react-native-vision-camera, react-native-fast-tflite, ML Kit face detection, MMKV (MIT); EdgeFace / MiniFASNet (open-source / Apache-2.0); @vladmandic/face-api (MIT); Express, Vite, React (MIT).

@@ -26,15 +26,15 @@ The backend is never part of the authentication decision.
 
 ## Required Native Model Assets
 
-The runnable native demo already includes:
+The native app bundles both required assets — nothing further to add:
 
-- `mobilefacenet.tflite`
-- `minifasnet.tflite`
+- `edgeface_s.tflite` — recognition, 14.2 MB float32, 112×112 → 512-d
+- `minifasnet.tflite` — passive anti-spoof, 5.7 MB, 80×80 BGR
 
-For the compact production target, add:
-
-- `edgeface_s.tflite`
-- `mobilefacenet.tflite` optional fallback
+Total **19.9 MB**. `edgeface_s` is the active recognition model
+(`ACTIVE_RECOGNITION` in `app/src/config.ts`). MobileFaceNet appears in config as
+a spec placeholder only — its asset is not bundled and selecting it throws at
+load.
 
 Before demoing production inference, open each file in Netron and confirm the
 I/O in `app/src/config.ts`.

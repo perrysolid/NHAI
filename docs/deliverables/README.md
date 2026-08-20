@@ -15,14 +15,14 @@ adb install -r docs/deliverables/DatalakeFaceAuth-android-universal-release.apk
 
 | File | Target device | Size | SHA-256 |
 |------|---------------|------|---------|
-| `DatalakeFaceAuth-android-universal-release.apk` | One APK for all Android phones: arm64-v8a + armeabi-v7a | 82 MB | `daaab83bd37c6ffe81f4541b72127a9bff92053ab39d7be8753f1d42fb1f922e` |
-| `DatalakeFaceAuth-android-arm64-v8a-release.apk` | Modern 64-bit Android phones (recommended) | 63 MB | `b4cd957c0856874226d8e874a67727ee4c478f8c5a4f0fa7918727faa84064a1` |
-| `DatalakeFaceAuth-android-armeabi-v7a-release.apk` | Older 32-bit Android phones | 53 MB | `6c5825feda255619c7a68272829e0fa02867760516dd3cbc9bf1411561d3df51` |
+| `DatalakeFaceAuth-android-universal-release.apk` | One APK for all Android phones: arm64-v8a + armeabi-v7a | 82 MB | `88f11ef9001f981b005554f42860c3bbc7deb557b8a92b3e932e04234a9be403` |
+| `DatalakeFaceAuth-android-arm64-v8a-release.apk` | Modern 64-bit Android phones (recommended) | 63 MB | `19ed56e990a8dcf1952a2f3e8f3de8ec4384c30a6cf3d85b8d691919963d55c7` |
+| `DatalakeFaceAuth-android-armeabi-v7a-release.apk` | Older 32-bit Android phones | 53 MB | `db19e048bf0aabcbc9f2e4bd65e4d3e68e7772f63f069ea0aff29b10cad49568` |
 
 Package details:
 
 - App id: `com.datalakefaceauth`
-- Version: `4.2` (versionCode 35)
+- Version: `4.2` (versionCode **36**) — confirmed with `aapt dump badging`
 - Branch: `main`
 - Recognition model: **EdgeFace-S Float32** (14 MB, 512-dim ArcFace — full precision)
 - Threshold: `0.65` cosine similarity (genuine ~0.90–0.98, impostor ~0.20–0.50)

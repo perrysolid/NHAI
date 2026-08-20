@@ -111,7 +111,7 @@ Quality Gates (single face, pose, lighting)
     └── Verify Mode
         Randomised active challenge (2 of 4 actions)
         Passive MiniFASNet + Active challenge → Dual liveness
-        Recognition (EdgeFace / MobileFaceNet)
+        Recognition (EdgeFace-S, 512-d)
         Geofence check (GPS vs cached site data)
         Composite score (0–100)
         Queue attendance record

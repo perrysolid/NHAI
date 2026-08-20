@@ -1,5 +1,13 @@
 # NHAI Innovation Hackathon 7.0 — Implementation Plan
 
+> **Historical document — kept for provenance.** This was the plan written at the
+> start of the project. Several decisions changed during implementation, most
+> importantly the recognition model: **EdgeFace-S (float32, 14.2 MB) is the
+> active bundled model**, not MobileFaceNet, and the bundled total is **19.9 MB**,
+> not 10.7 MB. For the current state see
+> [`TECHNICAL_DOCUMENTATION.md`](TECHNICAL_DOCUMENTATION.md) and
+> [`NHAI_HACKATHON_ALIGNMENT.md`](NHAI_HACKATHON_ALIGNMENT.md).
+
 On-device offline auth that works well across React Native Android and iOS, plus
 a Vercel web demo and AWS/Render-compatible sync backend.
 
@@ -13,7 +21,7 @@ dashboard (never in the auth path).
 ## Architecture
 ```
 DEVICE (offline, scored): Camera → Face detect (ML Kit) → Liveness (MiniFASNet +
-active challenge) → Recognition (MobileFaceNet now; EdgeFace-S target) → queue
+active challenge) → Recognition (EdgeFace-S) → queue
    │ (only when network returns)
    ▼
 AWS/RENDER (online): POST /api/sync → validate → Postgres → 200 OK → device PURGES.
@@ -86,7 +94,7 @@ full sync→purge lifecycle before the backend is live.
 4. Spoof test — printed photo + phone-screen photo → both rejected (the winning moment).
 5. Live blink/smile active challenge.
 6. Network on → records sync to backend dashboard → local queue purges to empty.
-7. End on Benchmark screen: model assets 10.7 MB, offline auth path, and device latency report.
+7. End on Benchmark screen: model assets 19.9 MB, offline auth path, and device latency report.
 
 ## Sources
 - EdgeFace — arXiv 2307.01838; IEEE TBIOM 2024; github.com/otroshi/edgeface.
