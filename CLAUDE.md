@@ -64,7 +64,7 @@ Break any of these and the product is wrong, not just buggy.
 # ── app (primary) ──
 cd app
 npm install
-npx jest                              # 126 unit tests
+npx jest                              # 150 unit tests
 npx tsc --noEmit                      # type-check
 npm run lint
 npx react-native run-android          # needs JDK 17
@@ -74,7 +74,7 @@ cd android && ./gradlew assembleRelease   # ABI-split APKs -> app/build/outputs/
 # ── backend ──
 cd backend
 npm install && npm run build && npm start   # tsc -> dist/, node dist/index.js
-npm test                                    # 38 tests, node:test via tsx
+npm test                                    # 58 tests, node:test via tsx
 npm run typecheck                           # includes *.test.ts (build excludes them)
 npm run dev                                 # tsx watch
 # Refuses to start without API_KEY + ADMIN_USER + ADMIN_PASSWORD.
@@ -87,7 +87,7 @@ npm run build                          # tsc -b && vite build
 npm run test:e2e                       # Playwright, 4 specs
 ```
 
-**Current test state (verified):** `app` **126 passing**, `backend` **38
+**Current test state (verified):** `app` **150 passing**, `backend` **58
 passing**, both stable across repeated runs; `tsc` clean in app / backend / web;
 **0 lint errors** in app and web. App type-checks under **both** states of
 `FLAGS.CALIBRATE_LIVENESS`.
@@ -133,12 +133,15 @@ Swapping it is a one-line change *plus* registering the asset in
 
 Several docs are stale on the model facts. The code is right:
 
-- `README.md` and `docs/NHAI_HACKATHON_ALIGNMENT.md` claim **10.7 MB** of bundled
-  models (MobileFaceNet 5.0 + MiniFASNet 5.7). Reality: **~19.9 MB**
+- ✅ **Fixed (20 Aug 2026).** `README.md`, `docs/NHAI_HACKATHON_ALIGNMENT.md`,
+  `docs/TEST_REPORT.md`, `docs/DATALAKE_INTEGRATION_GUIDE.md`, and
+  `docs/IMPLEMENTATION_PLAN.md` used to claim **10.7 MB** of bundled models
+  (MobileFaceNet 5.0 + MiniFASNet 5.7). All now state the reality: **19.9 MB**
   (EdgeFace-S float32 14.2 + MiniFASNet 5.7). Still under the 20 MB brief, but
   barely — INT8 or float16 EdgeFace is the headroom lever.
-- `app/assets/models/README.md` and the README table describe EdgeFace-S as
-  **INT8 (~1–2 MB)**. It is float32. Commit `400102a` switched away from INT8
+- ✅ **Fixed (20 Aug 2026).** `app/assets/models/README.md` used to describe
+  EdgeFace-S as **INT8 (~1–2 MB)** and list MobileFaceNet as bundled. It now
+  states float32 / 14.2 MB. Commit `400102a` switched away from INT8
   deliberately: *"switch to Float32 EdgeFace-S for accurate face matching."*
 - `finetune/README.md` targets **float16 (~3.5 MB)** as the drop-in. That is the
   intended next step, not the current state.
@@ -538,9 +541,11 @@ outside that city read "not in zone"). Mock-provider fixes are rejected.
   model swap, users see "no enrollments" and must re-enroll. `cosineSimilarity`
   throws a deliberately user-readable error on mismatch. This is correct
   behaviour — don't "fix" it by padding or truncating vectors.
-- **`APP_VERSION` drifts.** `CameraScreen.tsx:127` says `v3.0 · build 22`;
-  `android/app/build.gradle` says `versionName 4.2 / versionCode 35`. The gradle
-  values are authoritative for releases. Update both.
+- **`APP_VERSION` drifts — currently aligned, keep it that way.** As of build 36,
+  `CameraScreen.tsx` and `android/app/build.gradle` agree on `v4.2 / 36`, and the
+  shipped APKs verify at `versionCode='36'` via `aapt dump badging`. The gradle
+  values are authoritative for releases. When you bump, update **both**, plus the
+  version and SHA-256 table in `docs/deliverables/README.md`.
 - **MMKV encryption key is hardcoded** — `'replace-with-device-keychain-secret'`
   in `auth/mmkvStore.ts`. It must come from the platform keystore/keychain before
   any real deployment. Flagged in §8.

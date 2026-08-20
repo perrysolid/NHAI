@@ -236,6 +236,33 @@ describe('missing-column detection', () => {
     );
   });
 
+  /**
+   * The one that actually broke production. PostgREST rejects an unknown column
+   * from its cached schema before Postgres sees the statement, so the write
+   * path returns PGRST204 with a message containing no "does not exist" — the
+   * first version of this guard matched only 42703 and let it through.
+   */
+  test('recognises the PostgREST write-path form (PGRST204, schema cache)', () => {
+    assert.equal(
+      isMissingColumnError({
+        code: 'PGRST204',
+        message:
+          "Could not find the 'presence_reason' column of 'attendance' in the schema cache",
+      }),
+      true,
+    );
+  });
+
+  test('recognises the schema-cache message with no code', () => {
+    assert.equal(
+      isMissingColumnError({
+        message:
+          "Could not find the 'present' column of 'attendance' in the schema cache",
+      }),
+      true,
+    );
+  });
+
   test('recognises it from the message alone', () => {
     // Older clients surface no `code`.
     assert.equal(
@@ -251,6 +278,13 @@ describe('missing-column detection', () => {
       {code: '42501', message: 'permission denied for table attendance'},
       {message: 'fetch failed'},
       {},
+      // A MISSING TABLE is not a missing column — that is a real outage and
+      // must surface, not be retried away with two fields removed.
+      {code: '42P01', message: 'relation "attendance" does not exist'},
+      {
+        code: 'PGRST205',
+        message: "Could not find the table 'public.attendance' in the schema cache",
+      },
     ]) {
       assert.equal(isMissingColumnError(e), false, JSON.stringify(e));
     }
